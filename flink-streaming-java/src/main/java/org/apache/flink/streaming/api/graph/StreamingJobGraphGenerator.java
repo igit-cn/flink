@@ -25,6 +25,7 @@ import org.apache.flink.api.common.operators.ResourceSpec;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
+import org.apache.flink.runtime.OperatorIDPair;
 import org.apache.flink.runtime.checkpoint.CheckpointRetentionPolicy;
 import org.apache.flink.runtime.checkpoint.MasterTriggerRestoreHook;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
@@ -408,21 +409,12 @@ public class StreamingJobGraphGenerator {
 
 		JobVertexID jobVertexId = new JobVertexID(hash);
 
-		List<JobVertexID> legacyJobVertexIds = new ArrayList<>(legacyHashes.size());
-		for (Map<Integer, byte[]> legacyHash : legacyHashes) {
-			hash = legacyHash.get(streamNodeId);
-			if (null != hash) {
-				legacyJobVertexIds.add(new JobVertexID(hash));
-			}
-		}
-
 		List<Tuple2<byte[], byte[]>> chainedOperators = chainedOperatorHashes.get(streamNodeId);
-		List<OperatorID> chainedOperatorVertexIds = new ArrayList<>();
-		List<OperatorID> userDefinedChainedOperatorVertexIds = new ArrayList<>();
+		List<OperatorIDPair> operatorIDPairs = new ArrayList<>();
 		if (chainedOperators != null) {
 			for (Tuple2<byte[], byte[]> chainedOperator : chainedOperators) {
-				chainedOperatorVertexIds.add(new OperatorID(chainedOperator.f0));
-				userDefinedChainedOperatorVertexIds.add(chainedOperator.f1 != null ? new OperatorID(chainedOperator.f1) : null);
+				OperatorID userDefinedOperatorID = chainedOperator.f1 == null ? null : new OperatorID(chainedOperator.f1);
+				operatorIDPairs.add(OperatorIDPair.of(new OperatorID(chainedOperator.f0), userDefinedOperatorID));
 			}
 		}
 
@@ -430,9 +422,7 @@ public class StreamingJobGraphGenerator {
 			jobVertex = new InputOutputFormatVertex(
 					chainedNames.get(streamNodeId),
 					jobVertexId,
-					legacyJobVertexIds,
-					chainedOperatorVertexIds,
-					userDefinedChainedOperatorVertexIds);
+					operatorIDPairs);
 
 			chainedInputOutputFormats
 				.get(streamNodeId)
@@ -441,9 +431,7 @@ public class StreamingJobGraphGenerator {
 			jobVertex = new JobVertex(
 					chainedNames.get(streamNodeId),
 					jobVertexId,
-					legacyJobVertexIds,
-					chainedOperatorVertexIds,
-					userDefinedChainedOperatorVertexIds);
+					operatorIDPairs);
 		}
 
 		jobVertex.setResources(chainedMinResources.get(streamNodeId), chainedPreferredResources.get(streamNodeId));
@@ -575,8 +563,7 @@ public class StreamingJobGraphGenerator {
 				resultPartitionType = ResultPartitionType.BLOCKING;
 				break;
 			case UNDEFINED:
-				resultPartitionType = streamGraph.isBlockingConnectionsBetweenChains() ?
-						ResultPartitionType.BLOCKING : ResultPartitionType.PIPELINED_BOUNDED;
+				resultPartitionType = determineResultPartitionType(partitioner);
 				break;
 			default:
 				throw new UnsupportedOperationException("Data exchange mode " +
@@ -584,7 +571,7 @@ public class StreamingJobGraphGenerator {
 		}
 
 		JobEdge jobEdge;
-		if (partitioner instanceof ForwardPartitioner || partitioner instanceof RescalePartitioner) {
+		if (isPointwisePartitioner(partitioner)) {
 			jobEdge = downStreamVertex.connectNewDataSetAsInput(
 				headVertex,
 				DistributionPattern.POINTWISE,
@@ -601,6 +588,33 @@ public class StreamingJobGraphGenerator {
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("CONNECTED: {} - {} -> {}", partitioner.getClass().getSimpleName(),
 					headOfChain, downStreamVertexID);
+		}
+	}
+
+	private static boolean isPointwisePartitioner(StreamPartitioner<?> partitioner) {
+		return partitioner instanceof ForwardPartitioner || partitioner instanceof RescalePartitioner;
+	}
+
+	private ResultPartitionType determineResultPartitionType(StreamPartitioner<?> partitioner) {
+		switch (streamGraph.getGlobalDataExchangeMode()) {
+			case ALL_EDGES_BLOCKING:
+				return ResultPartitionType.BLOCKING;
+			case FORWARD_EDGES_PIPELINED:
+				if (partitioner instanceof ForwardPartitioner) {
+					return ResultPartitionType.PIPELINED_BOUNDED;
+				} else {
+					return ResultPartitionType.BLOCKING;
+				}
+			case POINTWISE_EDGES_PIPELINED:
+				if (isPointwisePartitioner(partitioner)) {
+					return ResultPartitionType.PIPELINED_BOUNDED;
+				} else {
+					return ResultPartitionType.BLOCKING;
+				}
+			case ALL_EDGES_PIPELINED:
+				return ResultPartitionType.PIPELINED_BOUNDED;
+			default:
+				throw new RuntimeException("Unrecognized global data exchange mode " + streamGraph.getGlobalDataExchangeMode());
 		}
 	}
 
@@ -950,6 +964,7 @@ public class StreamingJobGraphGenerator {
 				cfg.getMaxConcurrentCheckpoints(),
 				retentionAfterTermination,
 				getCheckpointingMode(cfg) == CheckpointingMode.EXACTLY_ONCE,
+				cfg.isUnalignedCheckpointsEnabled(),
 				cfg.isPreferCheckpointForRecovery(),
 				cfg.getTolerableCheckpointFailureNumber()),
 			serializedStateBackend,

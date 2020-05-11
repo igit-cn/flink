@@ -34,6 +34,7 @@ import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunctio
 import org.apache.flink.util.TestLogger;
 
 import org.hamcrest.Matchers;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -49,6 +50,7 @@ import static org.junit.Assert.assertThat;
 /**
  * Integration test for performing the unaligned checkpoint.
  */
+@Ignore("Unstable")
 public class UnalignedCheckpointITCase extends TestLogger {
 	public static final String NUM_COMPLETED_CHECKPOINTS = "numCompletedCheckpoints";
 
@@ -57,7 +59,7 @@ public class UnalignedCheckpointITCase extends TestLogger {
 
 	@Rule
 	public final Timeout timeout = Timeout.builder()
-		.withTimeout(90, TimeUnit.SECONDS)
+		.withTimeout(300, TimeUnit.SECONDS)
 		.build();
 
 	@Test

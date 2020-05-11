@@ -52,12 +52,13 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter.NO_OP;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Tests for the behaviors of the {@link CheckpointedInputGate} with {@link CachedBufferStorage}.
+ * Tests for the behaviors of the {@link CheckpointedInputGate}.
  */
 public class CheckpointBarrierUnalignerTest {
 
@@ -80,7 +81,6 @@ public class CheckpointBarrierUnalignerTest {
 	public void ensureEmpty() throws Exception {
 		assertFalse(inputGate.pollNext().isPresent());
 		assertTrue(inputGate.isFinished());
-		assertTrue(inputGate.isEmpty());
 
 		channelStateWriter.close();
 		inputGate.close();
@@ -543,7 +543,7 @@ public class CheckpointBarrierUnalignerTest {
 			"Test",
 			toNotify);
 		barrierHandler.getBufferReceivedListener().ifPresent(gate::registerBufferReceivedListener);
-		return new CheckpointedInputGate(gate, new EmptyBufferStorage(), barrierHandler);
+		return new CheckpointedInputGate(gate, barrierHandler);
 	}
 
 	private void assertInflightData(BufferOrEvent... expected) {
@@ -608,13 +608,12 @@ public class CheckpointBarrierUnalignerTest {
 			}
 
 			assertTrue(checkpointMetaData.getTimestamp() > 0);
-			assertTrue(checkpointMetrics.getBytesBufferedInAlignment() >= 0);
 			assertTrue(checkpointMetrics.getAlignmentDurationNanos() >= 0);
 
 			nextExpectedCheckpointId = checkpointMetaData.getCheckpointId() + 1;
 
 			for (int index = 0; index < inputGate.getNumberOfInputChannels(); index++) {
-				inputGate.getChannel(index).requestInflightBuffers(checkpointMetaData.getCheckpointId());
+				inputGate.getChannel(index).spillInflightBuffers(checkpointMetaData.getCheckpointId(), NO_OP);
 			}
 		}
 

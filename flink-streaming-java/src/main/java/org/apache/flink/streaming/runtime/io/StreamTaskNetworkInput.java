@@ -24,6 +24,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
 import org.apache.flink.runtime.event.AbstractEvent;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
+import org.apache.flink.runtime.io.network.api.CheckpointBarrier;
 import org.apache.flink.runtime.io.network.api.EndOfPartitionEvent;
 import org.apache.flink.runtime.io.network.api.serialization.RecordDeserializer;
 import org.apache.flink.runtime.io.network.api.serialization.RecordDeserializer.DeserializationResult;
@@ -134,13 +135,15 @@ public final class StreamTaskNetworkInput<T> implements StreamTaskInput<T> {
 
 			Optional<BufferOrEvent> bufferOrEvent = checkpointedInputGate.pollNext();
 			if (bufferOrEvent.isPresent()) {
+				// return to the mailbox after receiving a checkpoint barrier to avoid processing of
+				// data after the barrier before checkpoint is performed for unaligned checkpoint mode
+				if (bufferOrEvent.get().isEvent() && bufferOrEvent.get().getEvent() instanceof CheckpointBarrier) {
+					return InputStatus.MORE_AVAILABLE;
+				}
 				processBufferOrEvent(bufferOrEvent.get());
 			} else {
 				if (checkpointedInputGate.isFinished()) {
 					checkState(checkpointedInputGate.getAvailableFuture().isDone(), "Finished BarrierHandler should be available");
-					if (!checkpointedInputGate.isEmpty()) {
-						throw new IllegalStateException("Trailing data in checkpoint barrier handler.");
-					}
 					return InputStatus.END_OF_INPUT;
 				}
 				return InputStatus.NOTHING_AVAILABLE;
@@ -214,11 +217,7 @@ public final class StreamTaskNetworkInput<T> implements StreamTaskInput<T> {
 					ChannelStateWriter.SEQUENCE_NUMBER_UNKNOWN,
 					buffer));
 
-			channelStateWriter.addInputData(
-				checkpointId,
-				channel.getChannelInfo(),
-				ChannelStateWriter.SEQUENCE_NUMBER_UNKNOWN,
-				checkpointedInputGate.requestInflightBuffers(checkpointId, channelIndex).toArray(new Buffer[0]));
+			checkpointedInputGate.spillInflightBuffers(checkpointId, channelIndex, channelStateWriter);
 		}
 		return checkpointedInputGate.getAllBarriersReceivedFuture(checkpointId);
 	}

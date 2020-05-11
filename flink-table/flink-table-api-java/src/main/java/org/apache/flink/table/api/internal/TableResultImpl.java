@@ -22,6 +22,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.ResultKind;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.utils.PrintUtils;
@@ -40,7 +41,7 @@ import java.util.Optional;
  * Implementation for {@link TableResult}.
  */
 @Internal
-public class TableResultImpl implements TableResult {
+class TableResultImpl implements TableResult {
 	public static final TableResult TABLE_RESULT_OK = TableResultImpl.builder()
 			.resultKind(ResultKind.SUCCESS)
 			.tableSchema(TableSchema.builder().field("result", DataTypes.STRING()).build())
@@ -51,16 +52,19 @@ public class TableResultImpl implements TableResult {
 	private final TableSchema tableSchema;
 	private final ResultKind resultKind;
 	private final Iterator<Row> data;
+	private final PrintStyle printStyle;
 
 	private TableResultImpl(
 			@Nullable JobClient jobClient,
 			TableSchema tableSchema,
 			ResultKind resultKind,
-			Iterator<Row> data) {
+			Iterator<Row> data,
+			PrintStyle printStyle) {
 		this.jobClient = jobClient;
 		this.tableSchema = Preconditions.checkNotNull(tableSchema, "tableSchema should not be null");
 		this.resultKind = Preconditions.checkNotNull(resultKind, "resultKind should not be null");
 		this.data = Preconditions.checkNotNull(data, "data should not be null");
+		this.printStyle = Preconditions.checkNotNull(printStyle, "printStyle should not be null");
 	}
 
 	@Override
@@ -86,7 +90,18 @@ public class TableResultImpl implements TableResult {
 	@Override
 	public void print() {
 		Iterator<Row> it = collect();
-		PrintUtils.printAsTableauForm(getTableSchema(), it, new PrintWriter(System.out));
+		switch (printStyle) {
+			case TABLEAU:
+				PrintUtils.printAsTableauForm(getTableSchema(), it, new PrintWriter(System.out));
+				break;
+			case RAW_CONTENT:
+				while (it.hasNext()) {
+					System.out.println(String.join(",", PrintUtils.rowToString(it.next())));
+				}
+				break;
+			default:
+				throw new TableException("Unsupported print style: " + printStyle);
+		}
 	}
 
 	public static Builder builder() {
@@ -101,6 +116,7 @@ public class TableResultImpl implements TableResult {
 		private TableSchema tableSchema = null;
 		private ResultKind resultKind = null;
 		private Iterator<Row> data = null;
+		private PrintStyle printStyle = PrintStyle.TABLEAU;
 
 		private Builder() {
 		}
@@ -138,7 +154,7 @@ public class TableResultImpl implements TableResult {
 		}
 
 		/**
-		 * Specifies an row iterator as the execution result .
+		 * Specifies an row iterator as the execution result.
 		 *
 		 * @param rowIterator a row iterator as the execution result.
 		 */
@@ -149,7 +165,7 @@ public class TableResultImpl implements TableResult {
 		}
 
 		/**
-		 * Specifies an row list as the execution result .
+		 * Specifies an row list as the execution result.
 		 *
 		 * @param rowList a row list as the execution result.
 		 */
@@ -160,11 +176,36 @@ public class TableResultImpl implements TableResult {
 		}
 
 		/**
+		 * Specifies print style. Default is {@link PrintStyle#TABLEAU}.
+		 */
+		public Builder setPrintStyle(PrintStyle printStyle) {
+			Preconditions.checkNotNull(printStyle, "printStyle should not be null");
+			this.printStyle = printStyle;
+			return this;
+		}
+
+		/**
 		 * Returns a {@link TableResult} instance.
 		 */
 		public TableResult build() {
-			return new TableResultImpl(jobClient, tableSchema, resultKind, data);
+			return new TableResultImpl(jobClient, tableSchema, resultKind, data, printStyle);
 		}
+	}
+
+	/**
+	 * PrintStyle defines the styles of printing.
+	 */
+	public enum PrintStyle {
+		/**
+		 * print the result schema and content as tableau form.
+		 */
+		TABLEAU,
+
+		/**
+		 * only print the result content as raw form.
+		 * column delimiter is ",", row delimiter is "\n".
+		 */
+		RAW_CONTENT
 	}
 
 }

@@ -20,21 +20,25 @@ import sys
 import tempfile
 import warnings
 from abc import ABCMeta, abstractmethod
+from typing import Union, List, Tuple
 
 from py4j.java_gateway import get_java_class, get_method
 
 from pyflink.common import JobExecutionResult
 from pyflink.serializers import BatchedSerializer, PickleSerializer
 from pyflink.table.catalog import Catalog
+from pyflink.table.serializers import ArrowSerializer
+from pyflink.table.statement_set import StatementSet
 from pyflink.table.table_config import TableConfig
 from pyflink.table.descriptors import StreamTableDescriptor, BatchTableDescriptor
 
 from pyflink.java_gateway import get_gateway
 from pyflink.table import Table
 from pyflink.table.types import _to_java_type, _create_type_verifier, RowType, DataType, \
-    _infer_schema_from_data, _create_converter
+    _infer_schema_from_data, _create_converter, from_arrow_type, RowField, create_arrow_schema
 from pyflink.util import utils
-from pyflink.util.utils import get_j_env_configuration, is_local_deployment
+from pyflink.util.utils import get_j_env_configuration, is_local_deployment, load_java_class, \
+    to_j_explain_detail_arr
 
 __all__ = [
     'BatchTableEnvironment',
@@ -345,13 +349,25 @@ class TableEnvironment(object):
 
     def list_tables(self):
         """
-        Gets the names of all tables in the current database of the current catalog.
+        Gets the names of all tables and views in the current database of the current catalog.
+        It returns both temporary and permanent tables and views.
 
-        :return: List of table names in the current database of the current catalog.
+        :return: List of table and view names in the current database of the current catalog.
         :rtype: list[str]
         """
         j_table_name_array = self._j_tenv.listTables()
         return [item for item in j_table_name_array]
+
+    def list_views(self):
+        """
+        Gets the names of all views in the current database of the current catalog.
+        It returns both temporary and permanent views.
+
+        :return: List of view names in the current database of the current catalog.
+        :rtype: list[str]
+        """
+        j_view_name_array = self._j_tenv.listViews()
+        return [item for item in j_view_name_array]
 
     def list_user_defined_functions(self):
         """
@@ -454,6 +470,22 @@ class TableEnvironment(object):
         else:
             return self._j_tenv.explain(table._j_table, extended)
 
+    def explain_sql(self, stmt, *extra_details):
+        """
+        Returns the AST of the specified statement and the execution plan.
+
+        :param stmt: The statement for which the AST and execution plan will be returned.
+        :type stmt: str
+        :param extra_details: The extra explain details which the explain result should include,
+                              e.g. estimated cost, changelog mode for streaming
+        :type extra_details: tuple[ExplainDetail] (variable-length arguments of ExplainDetail)
+        :return: The statement for which the AST and execution plan will be returned.
+        :rtype: str
+        """
+
+        j_extra_details = to_j_explain_detail_arr(extra_details)
+        return self._j_tenv.explainSql(stmt, j_extra_details)
+
     def sql_query(self, query):
         """
         Evaluates a SQL query on registered tables and retrieves the result as a
@@ -492,6 +524,18 @@ class TableEnvironment(object):
                 or a string message ("OK") for other statements.
         """
         return self._j_tenv.executeSql(stmt)
+
+    def create_statement_set(self):
+        """
+        Create a StatementSet instance which accepts DML statements or Tables,
+        the planner can optimize all added statements and Tables together
+        and then submit as one job.
+
+        :return statement_set instance
+        :rtype: pyflink.table.StatementSet
+        """
+        _j_statement_set = self._j_tenv.createStatementSet()
+        return StatementSet(_j_statement_set)
 
     def sql_update(self, stmt):
         """
@@ -754,7 +798,17 @@ class TableEnvironment(object):
         gateway = get_gateway()
         java_function = gateway.jvm.Thread.currentThread().getContextClassLoader()\
             .loadClass(function_class_name).newInstance()
-        self._j_tenv.registerFunction(name, java_function)
+        # this is a temporary solution and will be unified later when we use the new type
+        # system(DataType) to replace the old type system(TypeInformation).
+        if self._is_blink_planner and isinstance(self, BatchTableEnvironment):
+            if self._is_table_function(java_function):
+                self._register_table_function(name, java_function)
+            elif self._is_aggregate_function(java_function):
+                self._register_aggregate_function(name, java_function)
+            else:
+                self._j_tenv.registerFunction(name, java_function)
+        else:
+            self._j_tenv.registerFunction(name, java_function)
 
     def register_function(self, name, function):
         """
@@ -786,7 +840,14 @@ class TableEnvironment(object):
 
         .. versionadded:: 1.10.0
         """
-        self._j_tenv.registerFunction(name, function.java_user_defined_function())
+        java_function = function.java_user_defined_function()
+        # this is a temporary solution and will be unified later when we use the new type
+        # system(DataType) to replace the old type system(TypeInformation).
+        if self._is_blink_planner and isinstance(self, BatchTableEnvironment) and \
+                self._is_table_function(java_function):
+            self._register_table_function(name, java_function)
+        else:
+            self._j_tenv.registerFunction(name, java_function)
 
     def create_temporary_view(self, view_path, table):
         """
@@ -1082,10 +1143,8 @@ class TableEnvironment(object):
         temp_file = tempfile.NamedTemporaryFile(delete=False, dir=tempfile.mkdtemp())
         serializer = BatchedSerializer(self._serializer)
         try:
-            try:
+            with temp_file:
                 serializer.dump_to_stream(elements, temp_file)
-            finally:
-                temp_file.close()
             row_type_info = _to_java_type(schema)
             execution_config = self._get_j_env().getConfig()
             gateway = get_gateway()
@@ -1104,6 +1163,87 @@ class TableEnvironment(object):
                 j_input_format, row_type_info)
 
             return Table(self._j_tenv.fromTableSource(j_table_source))
+        finally:
+            os.unlink(temp_file.name)
+
+    def from_pandas(self, pdf,
+                    schema: Union[RowType, List[str], Tuple[str], List[DataType],
+                                  Tuple[DataType]] = None,
+                    splits_num: int = 1) -> Table:
+        """
+        Creates a table from a pandas DataFrame.
+
+        Example:
+        ::
+
+            >>> pdf = pd.DataFrame(np.random.rand(1000, 2))
+            # use the second parameter to specify custom field names
+            >>> table_env.from_pandas(pdf, ["a", "b"])
+            # use the second parameter to specify custom field types
+            >>> table_env.from_pandas(pdf, [DataTypes.DOUBLE(), DataTypes.DOUBLE()]))
+            # use the second parameter to specify custom table schema
+            >>> table_env.from_pandas(pdf,
+            ...                       DataTypes.ROW([DataTypes.FIELD("a", DataTypes.DOUBLE()),
+            ...                                      DataTypes.FIELD("b", DataTypes.DOUBLE())]))
+
+        :param pdf: The pandas DataFrame.
+        :param schema: The schema of the converted table.
+        :param splits_num: The number of splits the given Pandas DataFrame will be split into. It
+                           determines the number of parallel source tasks.
+                           If not specified, the default parallelism will be used.
+        :return: The result table.
+        """
+
+        import pandas as pd
+        if not isinstance(pdf, pd.DataFrame):
+            raise TypeError("Unsupported type, expected pandas.DataFrame, got %s" % type(pdf))
+
+        import pyarrow as pa
+        arrow_schema = pa.Schema.from_pandas(pdf, preserve_index=False)
+
+        if schema is not None:
+            if isinstance(schema, RowType):
+                result_type = schema
+            elif isinstance(schema, (list, tuple)) and isinstance(schema[0], str):
+                result_type = RowType(
+                    [RowField(field_name, from_arrow_type(field.type, field.nullable))
+                     for field_name, field in zip(schema, arrow_schema)])
+            elif isinstance(schema, (list, tuple)) and isinstance(schema[0], DataType):
+                result_type = RowType(
+                    [RowField(field_name, field_type) for field_name, field_type in zip(
+                        arrow_schema.names, schema)])
+            else:
+                raise TypeError("Unsupported schema type, it could only be of RowType, a "
+                                "list of str or a list of DataType, got %s" % schema)
+        else:
+            result_type = RowType([RowField(field.name, from_arrow_type(field.type, field.nullable))
+                                   for field in arrow_schema])
+
+        # serializes to a file, and we read the file in java
+        temp_file = tempfile.NamedTemporaryFile(delete=False, dir=tempfile.mkdtemp())
+        import pytz
+        serializer = ArrowSerializer(
+            create_arrow_schema(result_type.field_names(), result_type.field_types()),
+            result_type,
+            pytz.timezone(self.get_config().get_local_timezone()))
+        step = -(-len(pdf) // splits_num)
+        pdf_slices = [pdf[start:start + step] for start in range(0, len(pdf), step)]
+        data = [[c for (_, c) in pdf_slice.iteritems()] for pdf_slice in pdf_slices]
+        try:
+            with temp_file:
+                serializer.dump_to_stream(data, temp_file)
+            jvm = get_gateway().jvm
+
+            data_type = jvm.org.apache.flink.table.types.utils.TypeConversions\
+                .fromLegacyInfoToDataType(_to_java_type(result_type))
+            if self._is_blink_planner:
+                data_type = data_type.bridgedTo(
+                    load_java_class('org.apache.flink.table.data.RowData'))
+
+            j_arrow_table_source = \
+                jvm.org.apache.flink.table.runtime.arrow.ArrowUtils.createArrowTableSource(
+                    data_type, temp_file.name)
+            return Table(self._j_tenv.fromTableSource(j_arrow_table_source))
         finally:
             os.unlink(temp_file.name)
 
@@ -1129,6 +1269,42 @@ class TableEnvironment(object):
     @abstractmethod
     def _get_j_env(self):
         pass
+
+    @staticmethod
+    def _is_table_function(java_function):
+        java_function_class = java_function.getClass()
+        j_table_function_class = get_java_class(
+            get_gateway().jvm.org.apache.flink.table.functions.TableFunction)
+        return j_table_function_class.isAssignableFrom(java_function_class)
+
+    @staticmethod
+    def _is_aggregate_function(java_function):
+        java_function_class = java_function.getClass()
+        j_aggregate_function_class = get_java_class(
+            get_gateway().jvm.org.apache.flink.table.functions.UserDefinedAggregateFunction)
+        return j_aggregate_function_class.isAssignableFrom(java_function_class)
+
+    def _register_table_function(self, name, table_function):
+        function_catalog = self._get_function_catalog()
+        gateway = get_gateway()
+        helper = gateway.jvm.org.apache.flink.table.functions.UserDefinedFunctionHelper
+        result_type = helper.getReturnTypeOfTableFunction(table_function)
+        function_catalog.registerTempSystemTableFunction(name, table_function, result_type)
+
+    def _register_aggregate_function(self, name, aggregate_function):
+        function_catalog = self._get_function_catalog()
+        gateway = get_gateway()
+        helper = gateway.jvm.org.apache.flink.table.functions.UserDefinedFunctionHelper
+        result_type = helper.getReturnTypeOfAggregateFunction(aggregate_function)
+        acc_type = helper.getAccumulatorTypeOfAggregateFunction(aggregate_function)
+        function_catalog.registerTempSystemAggregateFunction(
+            name, aggregate_function, result_type, acc_type)
+
+    def _get_function_catalog(self):
+        function_catalog_field = self._j_tenv.getClass().getDeclaredField("functionCatalog")
+        function_catalog_field.setAccessible(True)
+        function_catalog = function_catalog_field.get(self._j_tenv)
+        return function_catalog
 
 
 class StreamTableEnvironment(TableEnvironment):

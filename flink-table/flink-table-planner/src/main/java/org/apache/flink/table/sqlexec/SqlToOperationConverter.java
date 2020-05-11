@@ -40,6 +40,7 @@ import org.apache.flink.sql.parser.dql.SqlShowCatalogs;
 import org.apache.flink.sql.parser.dql.SqlShowDatabases;
 import org.apache.flink.sql.parser.dql.SqlShowFunctions;
 import org.apache.flink.sql.parser.dql.SqlShowTables;
+import org.apache.flink.sql.parser.dql.SqlShowViews;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.ValidationException;
@@ -60,12 +61,14 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.UnresolvedIdentifier;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.operations.CatalogSinkModifyOperation;
+import org.apache.flink.table.operations.ExplainOperation;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.PlannerQueryOperation;
 import org.apache.flink.table.operations.ShowCatalogsOperation;
 import org.apache.flink.table.operations.ShowDatabasesOperation;
 import org.apache.flink.table.operations.ShowFunctionsOperation;
 import org.apache.flink.table.operations.ShowTablesOperation;
+import org.apache.flink.table.operations.ShowViewsOperation;
 import org.apache.flink.table.operations.UseCatalogOperation;
 import org.apache.flink.table.operations.UseDatabaseOperation;
 import org.apache.flink.table.operations.ddl.AlterCatalogFunctionOperation;
@@ -89,6 +92,9 @@ import org.apache.flink.util.StringUtils;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.sql.SqlDialect;
+import org.apache.calcite.sql.SqlExplain;
+import org.apache.calcite.sql.SqlExplainFormat;
+import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
@@ -183,6 +189,10 @@ public class SqlToOperationConverter {
 			return Optional.of(converter.convertCreateView((SqlCreateView) validated));
 		} else if (validated instanceof SqlDropView) {
 			return Optional.of(converter.convertDropView((SqlDropView) validated));
+		} else if (validated instanceof SqlShowViews) {
+			return Optional.of(converter.convertShowViews((SqlShowViews) validated));
+		} else if (validated instanceof SqlExplain) {
+			return Optional.of(converter.convertExplain((SqlExplain) validated));
 		} else if (validated.getKind().belongsTo(SqlKind.QUERY)) {
 			return Optional.of(converter.convertSqlQuery(validated));
 		} else {
@@ -197,8 +207,7 @@ public class SqlToOperationConverter {
 	 */
 	private Operation convertCreateTable(SqlCreateTable sqlCreateTable) {
 		// primary key and unique keys are not supported
-		if ((sqlCreateTable.getPrimaryKeyList().size() > 0)
-			|| (sqlCreateTable.getUniqueKeysList().size() > 0)) {
+		if (sqlCreateTable.getFullConstraints().size() > 0) {
 			throw new SqlConversionException("Primary key and unique key are not supported yet.");
 		}
 
@@ -233,7 +242,8 @@ public class SqlToOperationConverter {
 		return new CreateTableOperation(
 			identifier,
 			catalogTable,
-			sqlCreateTable.isIfNotExists());
+			sqlCreateTable.isIfNotExists(),
+			sqlCreateTable.isTemporary());
 	}
 
 	/** Convert DROP TABLE statement. */
@@ -241,7 +251,7 @@ public class SqlToOperationConverter {
 		UnresolvedIdentifier unresolvedIdentifier = UnresolvedIdentifier.of(sqlDropTable.fullTableName());
 		ObjectIdentifier identifier = catalogManager.qualifyIdentifier(unresolvedIdentifier);
 
-		return new DropTableOperation(identifier, sqlDropTable.getIfExists());
+		return new DropTableOperation(identifier, sqlDropTable.getIfExists(), sqlDropTable.isTemporary());
 	}
 
 	/** convert ALTER TABLE statement. */
@@ -271,8 +281,11 @@ public class SqlToOperationConverter {
 				throw new ValidationException(String.format("Table %s doesn't exist or is a temporary table.",
 					tableIdentifier.toString()));
 			}
+		} else {
+			throw new ValidationException(
+					String.format("[%s] needs to implement",
+							sqlAlterTable.toSqlString(CalciteSqlDialect.DEFAULT)));
 		}
-		return null;
 	}
 
 	/** Convert CREATE FUNCTION statement. */
@@ -283,7 +296,8 @@ public class SqlToOperationConverter {
 			return new CreateTempSystemFunctionOperation(
 				unresolvedIdentifier.getObjectName(),
 				sqlCreateFunction.getFunctionClassName().getValueAs(String.class),
-				sqlCreateFunction.isIfNotExists()
+				sqlCreateFunction.isIfNotExists(),
+				parseLanguage(sqlCreateFunction.getFunctionLanguage())
 			);
 		} else {
 			FunctionLanguage language = parseLanguage(sqlCreateFunction.getFunctionLanguage());
@@ -523,6 +537,24 @@ public class SqlToOperationConverter {
 		return new DropViewOperation(identifier, sqlDropView.getIfExists(), sqlDropView.isTemporary());
 	}
 
+	/** Convert SHOW VIEWS statement. */
+	private Operation convertShowViews(SqlShowViews sqlShowViews) {
+		return new ShowViewsOperation();
+	}
+
+	/** Convert EXPLAIN statement. */
+	private Operation convertExplain(SqlExplain sqlExplain) {
+		Operation operation = convertSqlQuery(sqlExplain.getExplicandum());
+
+		if (sqlExplain.getDetailLevel() != SqlExplainLevel.EXPPLAN_ATTRIBUTES ||
+				sqlExplain.getDepth() != SqlExplain.Depth.PHYSICAL ||
+				sqlExplain.getFormat() != SqlExplainFormat.TEXT) {
+			throw new TableException("Only default behavior is supported now, EXPLAIN PLAN FOR xx");
+		}
+
+		return new ExplainOperation(operation);
+	}
+
 	/**
 	 * Create a table schema from {@link SqlCreateTable}. This schema contains computed column
 	 * fields, say, we have a create table DDL statement:
@@ -584,10 +616,6 @@ public class SqlToOperationConverter {
 		} catch (IllegalArgumentException e) {
 			throw new UnsupportedOperationException(
 				String.format("Unrecognized function language string %s", languageString), e);
-		}
-
-		if (language.equals(FunctionLanguage.PYTHON)) {
-			throw new UnsupportedOperationException("Only function language JAVA and SCALA are supported for now.");
 		}
 
 		return language;

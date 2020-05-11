@@ -28,7 +28,6 @@ import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
 import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
-import org.apache.flink.runtime.checkpoint.channel.ChannelStateReader;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
 import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.execution.CancelTaskException;
@@ -461,9 +460,8 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
 			ResultPartitionWriter[] writers = getEnvironment().getAllWriters();
 			if (writers != null) {
-				//TODO we should get proper state reader from getEnvironment().getTaskStateManager().getChannelStateReader()
 				for (ResultPartitionWriter writer : writers) {
-					writer.initializeState(ChannelStateReader.NO_OP);
+					writer.readRecoveredState(getEnvironment().getTaskStateManager().getChannelStateReader());
 				}
 			}
 		});
@@ -736,9 +734,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 			boolean advanceToEndOfEventTime) throws Exception {
 		try {
 			// No alignment if we inject a checkpoint
-			CheckpointMetrics checkpointMetrics = new CheckpointMetrics()
-				.setBytesBufferedInAlignment(0L)
-				.setAlignmentDurationNanos(0L);
+			CheckpointMetrics checkpointMetrics = new CheckpointMetrics().setAlignmentDurationNanos(0L);
 
 			subtaskCheckpointCoordinator.getChannelStateWriter().start(checkpointMetaData.getCheckpointId(), checkpointOptions);
 			boolean success = performCheckpoint(checkpointMetaData, checkpointOptions, checkpointMetrics, advanceToEndOfEventTime);
@@ -869,19 +865,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
 	private void notifyCheckpointComplete(long checkpointId) {
 		try {
-			boolean isRunning = this.isRunning;
-			if (isRunning) {
-				LOG.debug("Notification of complete checkpoint for task {}", getName());
-
-				for (StreamOperatorWrapper<?, ?> operatorWrapper : operatorChain.getAllOperators(true)) {
-					operatorWrapper.getStreamOperator().notifyCheckpointComplete(checkpointId);
-				}
-			} else {
-				LOG.debug("Ignoring notification of complete checkpoint for not-running task {}", getName());
-			}
-
-			subtaskCheckpointCoordinator.getChannelStateWriter().notifyCheckpointComplete(checkpointId);
-			getEnvironment().getTaskStateManager().notifyCheckpointComplete(checkpointId);
+			subtaskCheckpointCoordinator.notifyCheckpointComplete(checkpointId, operatorChain, this::isRunning);
 			if (isRunning && isSynchronousSavepointId(checkpointId)) {
 				finishTask();
 				// Reset to "notify" the internal synchronous savepoint mailbox loop.

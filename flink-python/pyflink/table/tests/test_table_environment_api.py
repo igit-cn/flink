@@ -35,8 +35,8 @@ from pyflink.table.types import RowType
 from pyflink.testing import source_sink_utils
 from pyflink.testing.test_case_utils import PyFlinkStreamTableTestCase, PyFlinkBatchTableTestCase, \
     PyFlinkBlinkBatchTableTestCase
-from pyflink.util.exceptions import TableException
 from pyflink.util.utils import get_j_env_configuration
+from pyflink.table.explain_detail import ExplainDetail
 
 
 class TableEnvironmentTest(object):
@@ -224,6 +224,26 @@ class StreamTableEnvironmentTests(TableEnvironmentTest, PyFlinkStreamTableTestCa
         expected = ['1,Hi,Hello']
         self.assert_equals(actual, expected)
 
+    def test_statement_set(self):
+        t_env = self.t_env
+        source = t_env.from_elements([(1, "Hi", "Hello"), (2, "Hello", "Hello")], ["a", "b", "c"])
+        field_names = ["a", "b", "c"]
+        field_types = [DataTypes.BIGINT(), DataTypes.STRING(), DataTypes.STRING()]
+        t_env.register_table_sink(
+            "sink1",
+            source_sink_utils.TestAppendSink(field_names, field_types))
+        t_env.register_table_sink(
+            "sink2",
+            source_sink_utils.TestAppendSink(field_names, field_types))
+
+        stmt_set = t_env.create_statement_set()
+
+        stmt_set.add_insert_sql("insert into sink1 select * from %s where a > 100" % source)\
+            .add_insert("sink2", source.filter("a < 100"), False)
+
+        actual = stmt_set.explain(ExplainDetail.CHANGELOG_MODE)
+        assert isinstance(actual, str)
+
     def test_explain_with_multi_sinks(self):
         t_env = self.t_env
         source = t_env.from_elements([(1, "Hi", "Hello"), (2, "Hello", "Hello")], ["a", "b", "c"])
@@ -242,7 +262,7 @@ class StreamTableEnvironmentTests(TableEnvironmentTest, PyFlinkStreamTableTestCa
         actual = t_env.explain(extended=True)
         assert isinstance(actual, str)
 
-    def test_sql_query(self):
+    def test_explain_sql_without_explain_detail(self):
         t_env = self.t_env
         source = t_env.from_elements([(1, "Hi", "Hello"), (2, "Hello", "Hello")], ["a", "b", "c"])
         field_names = ["a", "b", "c"]
@@ -251,15 +271,11 @@ class StreamTableEnvironmentTests(TableEnvironmentTest, PyFlinkStreamTableTestCa
             "sinks",
             source_sink_utils.TestAppendSink(field_names, field_types))
 
-        result = t_env.sql_query("select a + 1, b, c from %s" % source)
-        result.insert_into("sinks")
-        self.t_env.execute("test")
-        actual = source_sink_utils.results()
+        result = t_env.explain_sql("select a + 1, b, c from %s" % source)
 
-        expected = ['2,Hi,Hello', '3,Hello,Hello']
-        self.assert_equals(actual, expected)
+        assert isinstance(result, str)
 
-    def test_sql_update(self):
+    def test_explain_sql_with_explain_detail(self):
         t_env = self.t_env
         source = t_env.from_elements([(1, "Hi", "Hello"), (2, "Hello", "Hello")], ["a", "b", "c"])
         field_names = ["a", "b", "c"]
@@ -268,12 +284,10 @@ class StreamTableEnvironmentTests(TableEnvironmentTest, PyFlinkStreamTableTestCa
             "sinks",
             source_sink_utils.TestAppendSink(field_names, field_types))
 
-        t_env.sql_update("insert into sinks select * from %s" % source)
-        self.t_env.execute("test_sql_job")
+        result = t_env.explain_sql(
+            "select a + 1, b, c from %s" % source, ExplainDetail.CHANGELOG_MODE)
 
-        actual = source_sink_utils.results()
-        expected = ['1,Hi,Hello', '2,Hello,Hello']
-        self.assert_equals(actual, expected)
+        assert isinstance(result, str)
 
     def test_create_table_environment(self):
         table_config = TableConfig()
@@ -308,16 +322,16 @@ class StreamTableEnvironmentTests(TableEnvironmentTest, PyFlinkStreamTableTestCa
 
         self.assertEqual(
             planner.getClass().getName(),
-            "org.apache.flink.table.planner.StreamPlanner")
+            "org.apache.flink.table.planner.delegation.StreamPlanner")
 
         t_env = StreamTableEnvironment.create(
-            environment_settings=EnvironmentSettings.new_instance().use_blink_planner().build())
+            environment_settings=EnvironmentSettings.new_instance().use_old_planner().build())
 
         planner = t_env._j_tenv.getPlanner()
 
         self.assertEqual(
             planner.getClass().getName(),
-            "org.apache.flink.table.planner.delegation.StreamPlanner")
+            "org.apache.flink.table.planner.StreamPlanner")
 
     def test_table_environment_with_blink_planner(self):
         self.env.set_parallelism(1)
@@ -433,8 +447,29 @@ class BatchTableEnvironmentTests(TableEnvironmentTest, PyFlinkBatchTableTestCase
         t_env.sql_update("insert into sink1 select * from %s where a > 100" % source)
         t_env.sql_update("insert into sink2 select * from %s where a < 100" % source)
 
-        with self.assertRaises(TableException):
-            t_env.explain(extended=True)
+        actual = t_env.explain(extended=True)
+
+        assert isinstance(actual, str)
+
+    def test_statement_set(self):
+        t_env = self.t_env
+        source = t_env.from_elements([(1, "Hi", "Hello"), (2, "Hello", "Hello")], ["a", "b", "c"])
+        field_names = ["a", "b", "c"]
+        field_types = [DataTypes.BIGINT(), DataTypes.STRING(), DataTypes.STRING()]
+        t_env.register_table_sink(
+            "sink1",
+            CsvTableSink(field_names, field_types, "path1"))
+        t_env.register_table_sink(
+            "sink2",
+            CsvTableSink(field_names, field_types, "path2"))
+
+        stmt_set = t_env.create_statement_set()
+
+        stmt_set.add_insert_sql("insert into sink1 select * from %s where a > 100" % source)\
+            .add_insert("sink2", source.filter("a < 100"))
+
+        actual = stmt_set.explain()
+        assert isinstance(actual, str)
 
     def test_create_table_environment(self):
         table_config = TableConfig()
@@ -518,3 +553,19 @@ class BlinkBatchTableEnvironmentTests(PyFlinkBlinkBatchTableTestCase):
 
         actual = t_env.explain(extended=True)
         self.assertIsInstance(actual, str)
+
+    def test_register_java_function(self):
+        t_env = self.t_env
+
+        t_env.register_java_function(
+            "scalar_func", "org.apache.flink.table.expressions.utils.RichFunc0")
+
+        t_env.register_java_function(
+            "agg_func", "org.apache.flink.table.functions.aggfunctions.ByteMaxAggFunction")
+
+        t_env.register_java_function(
+            "table_func", "org.apache.flink.table.utils.TableFunc2")
+
+        actual = t_env.list_user_defined_functions()
+        expected = ['scalar_func', 'agg_func', 'table_func']
+        self.assert_equals(actual, expected)

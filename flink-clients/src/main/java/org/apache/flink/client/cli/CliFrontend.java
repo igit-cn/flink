@@ -29,6 +29,8 @@ import org.apache.flink.client.deployment.ClusterClientFactory;
 import org.apache.flink.client.deployment.ClusterClientServiceLoader;
 import org.apache.flink.client.deployment.ClusterDescriptor;
 import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
+import org.apache.flink.client.deployment.application.ApplicationConfiguration;
+import org.apache.flink.client.deployment.application.cli.ApplicationClusterDeployer;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.PackagedProgram;
 import org.apache.flink.client.program.PackagedProgramUtils;
@@ -89,6 +91,7 @@ public class CliFrontend {
 
 	// actions
 	private static final String ACTION_RUN = "run";
+	private static final String ACTION_RUN_APPLICATION = "run-application";
 	private static final String ACTION_INFO = "info";
 	private static final String ACTION_LIST = "list";
 	private static final String ACTION_CANCEL = "cancel";
@@ -165,6 +168,41 @@ public class CliFrontend {
 	//  Execute Actions
 	// --------------------------------------------------------------------------------------------
 
+	protected void runApplication(String[] args) throws Exception {
+		LOG.info("Running 'run-application' command.");
+
+		final Options commandOptions = CliFrontendParser.getRunCommandOptions();
+		final CommandLine commandLine = getCommandLine(commandOptions, args, true);
+
+		final ProgramOptions programOptions = new ProgramOptions(commandLine);
+
+		if (commandLine.hasOption(HELP_OPTION.getOpt())) {
+			CliFrontendParser.printHelpForRun(customCommandLines);
+			return;
+		}
+
+		final ApplicationDeployer deployer =
+				new ApplicationClusterDeployer(clusterClientServiceLoader);
+
+		final PackagedProgram program =
+				getPackagedProgram(programOptions);
+
+		final ApplicationConfiguration applicationConfiguration =
+				new ApplicationConfiguration(program.getArguments(), program.getMainClassName());
+
+		try {
+			final List<URL> jobJars = program.getJobJarAndDependencies();
+			final Configuration effectiveConfiguration =
+					getEffectiveConfiguration(commandLine, programOptions, jobJars);
+
+			LOG.debug("Effective executor configuration: {}", effectiveConfiguration);
+
+			deployer.run(effectiveConfiguration, applicationConfiguration);
+		} finally {
+			program.deleteExtractedLibraries();
+		}
+	}
+
 	/**
 	 * Executions the run action.
 	 *
@@ -176,7 +214,7 @@ public class CliFrontend {
 		final Options commandOptions = CliFrontendParser.getRunCommandOptions();
 		final CommandLine commandLine = getCommandLine(commandOptions, args, true);
 
-		final ProgramOptions programOptions = new ProgramOptions(commandLine);
+		final ProgramOptions programOptions = ProgramOptions.create(commandLine);
 
 		// evaluate help flag
 		if (commandLine.hasOption(HELP_OPTION.getOpt())) {
@@ -184,21 +222,8 @@ public class CliFrontend {
 			return;
 		}
 
-		if (!programOptions.isPython()) {
-			// Java program should be specified a JAR file
-			if (programOptions.getJarFilePath() == null) {
-				throw new CliArgsException("Java program should be specified a JAR file.");
-			}
-		}
-
-		final PackagedProgram program;
-		try {
-			LOG.info("Building program from JAR file");
-			program = buildProgram(programOptions);
-		}
-		catch (FileNotFoundException e) {
-			throw new CliArgsException("Could not build the program from JAR file: " + e.getMessage(), e);
-		}
+		final PackagedProgram program =
+				getPackagedProgram(programOptions);
 
 		final List<URL> jobJars = program.getJobJarAndDependencies();
 		final Configuration effectiveConfiguration =
@@ -211,6 +236,17 @@ public class CliFrontend {
 		} finally {
 			program.deleteExtractedLibraries();
 		}
+	}
+
+	private PackagedProgram getPackagedProgram(ProgramOptions programOptions) throws ProgramInvocationException, CliArgsException {
+		PackagedProgram program;
+		try {
+			LOG.info("Building program from JAR file");
+			program = buildProgram(programOptions);
+		} catch (FileNotFoundException e) {
+			throw new CliArgsException("Could not build the program from JAR file: " + e.getMessage(), e);
+		}
+		return program;
 	}
 
 	private Configuration getEffectiveConfiguration(
@@ -240,16 +276,12 @@ public class CliFrontend {
 
 		final CommandLine commandLine = CliFrontendParser.parse(commandOptions, args, true);
 
-		final ProgramOptions programOptions = new ProgramOptions(commandLine);
+		final ProgramOptions programOptions = ProgramOptions.create(commandLine);
 
 		// evaluate help flag
 		if (commandLine.hasOption(HELP_OPTION.getOpt())) {
 			CliFrontendParser.printHelpForInfo();
 			return;
-		}
-
-		if (programOptions.getJarFilePath() == null) {
-			throw new CliArgsException("The program JAR file was not specified.");
 		}
 
 		// -------- build the packaged program -------------
@@ -667,31 +699,17 @@ public class CliFrontend {
 	 *
 	 * @return A PackagedProgram (upon success)
 	 */
-	PackagedProgram buildProgram(final ProgramOptions runOptions) throws FileNotFoundException, ProgramInvocationException {
+	PackagedProgram buildProgram(final ProgramOptions runOptions)
+			throws FileNotFoundException, ProgramInvocationException, CliArgsException {
+		runOptions.validate();
+
 		String[] programArgs = runOptions.getProgramArgs();
 		String jarFilePath = runOptions.getJarFilePath();
 		List<URL> classpaths = runOptions.getClasspaths();
 
 		// Get assembler class
 		String entryPointClass = runOptions.getEntryPointClassName();
-		File jarFile = null;
-		if (runOptions.isPython()) {
-			// If the job is specified a jar file
-			if (jarFilePath != null) {
-				jarFile = getJarFile(jarFilePath);
-			}
-
-			// If the job is Python Shell job, the entry point class name is PythonGateWayServer.
-			// Otherwise, the entry point class of python job is PythonDriver
-			if (entryPointClass == null) {
-				entryPointClass = "org.apache.flink.client.python.PythonDriver";
-			}
-		} else {
-			if (jarFilePath == null) {
-				throw new IllegalArgumentException("Java program should be specified a JAR file.");
-			}
-			jarFile = getJarFile(jarFilePath);
-		}
+		File jarFile = jarFilePath != null ? getJarFile(jarFilePath) : null;
 
 		return PackagedProgram.newBuilder()
 			.setJarFile(jarFile)
@@ -891,6 +909,9 @@ public class CliFrontend {
 			switch (action) {
 				case ACTION_RUN:
 					run(params);
+					return 0;
+				case ACTION_RUN_APPLICATION:
+					runApplication(params);
 					return 0;
 				case ACTION_LIST:
 					list(params);

@@ -29,7 +29,7 @@ Flink exposes a metric system that allows gathering and exposing metrics to exte
 
 ## Registering metrics
 
-You can access the metric system from any user function that extends [RichFunction]({{ site.baseurl }}/dev/api_concepts.html#rich-functions) by calling `getRuntimeContext().getMetricGroup()`.
+You can access the metric system from any user function that extends [RichFunction]({% link dev/user_defined_functions.md %}#rich-functions) by calling `getRuntimeContext().getMetricGroup()`.
 This method returns a `MetricGroup` object on which you can create and register new metrics.
 
 ### Metric types
@@ -630,7 +630,7 @@ The domain thus identifies a metric class, while the key-property list identifie
 
 ### Graphite (org.apache.flink.metrics.graphite.GraphiteReporter)
 
-In order to use this reporter you must copy `/opt/flink-metrics-graphite-{{site.version}}.jar` into the `/lib` folder
+In order to use this reporter you must copy `/opt/flink-metrics-graphite-{{site.version}}.jar` into the `/plugins/graphite` folder
 of your Flink distribution.
 
 Parameters:
@@ -643,7 +643,7 @@ Example configuration:
 
 {% highlight yaml %}
 
-metrics.reporter.grph.class: org.apache.flink.metrics.graphite.GraphiteReporter
+metrics.reporter.grph.factory.class: org.apache.flink.metrics.graphite.GraphiteReporterFactory
 metrics.reporter.grph.host: localhost
 metrics.reporter.grph.port: 2003
 metrics.reporter.grph.protocol: TCP
@@ -1317,11 +1317,6 @@ Metrics related to data exchange between task executors using netty network comm
     <tr>
       <td>lastCheckpointRestoreTimestamp</td>
       <td>Timestamp when the last checkpoint was restored at the coordinator (in milliseconds).</td>
-      <td>Gauge</td>
-    </tr>
-    <tr>
-      <td>lastCheckpointAlignmentBuffered</td>
-      <td>The number of buffered bytes during alignment over all subtasks for the last checkpoint (in bytes).</td>
       <td>Gauge</td>
     </tr>
     <tr>
