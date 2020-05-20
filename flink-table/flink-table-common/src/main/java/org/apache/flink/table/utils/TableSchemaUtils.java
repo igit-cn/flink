@@ -26,6 +26,7 @@ import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.api.constraints.UniqueConstraint;
 import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.table.sources.TableSource;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.List;
@@ -54,6 +55,9 @@ public class TableSchemaUtils {
 					builder.field(tableColumn.getName(), tableColumn.getType());
 				}
 			});
+		tableSchema.getPrimaryKey().ifPresent(
+			uniqueConstraint -> builder.primaryKey(uniqueConstraint.getColumns().toArray(new String[0]))
+		);
 		return builder.build();
 	}
 
@@ -75,6 +79,22 @@ public class TableSchemaUtils {
 				"The given schema contains generated columns, schema: " + schema.toString());
 		}
 		return schema;
+	}
+
+	/**
+	 * Returns the field indices of primary key in the physical columns of
+	 * this schema (not include computed columns).
+	 */
+	public static int[] getPrimaryKeyIndices(TableSchema schema) {
+		if (schema.getPrimaryKey().isPresent()) {
+			RowType physicalRowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
+			List<String> fieldNames = physicalRowType.getFieldNames();
+			return schema.getPrimaryKey().get().getColumns().stream()
+				.mapToInt(fieldNames::indexOf)
+				.toArray();
+		} else {
+			return new int[0];
+		}
 	}
 
 	/**
