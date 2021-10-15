@@ -22,7 +22,6 @@ import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
-import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.io.network.partition.ResourceManagerPartitionTrackerFactory;
 import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
 import org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException;
@@ -33,58 +32,72 @@ import org.apache.flink.runtime.rpc.RpcUtils;
 
 import javax.annotation.Nullable;
 
-/**
- * Simple {@link ResourceManager} implementation for testing purposes.
- */
+import java.util.UUID;
+import java.util.concurrent.ForkJoinPool;
+import java.util.function.Function;
+
+/** Simple {@link ResourceManager} implementation for testing purposes. */
 public class TestingResourceManager extends ResourceManager<ResourceID> {
 
-	public TestingResourceManager(
-			RpcService rpcService,
-			ResourceID resourceId,
-			HighAvailabilityServices highAvailabilityServices,
-			HeartbeatServices heartbeatServices,
-			SlotManager slotManager,
-			ResourceManagerPartitionTrackerFactory clusterPartitionTrackerFactory,
-			JobLeaderIdService jobLeaderIdService,
-			FatalErrorHandler fatalErrorHandler,
-			ResourceManagerMetricGroup resourceManagerMetricGroup) {
-		super(
-			rpcService,
-			resourceId,
-			highAvailabilityServices,
-			heartbeatServices,
-			slotManager,
-			clusterPartitionTrackerFactory,
-			jobLeaderIdService,
-			new ClusterInformation("localhost", 1234),
-			fatalErrorHandler,
-			resourceManagerMetricGroup,
-			RpcUtils.INF_TIMEOUT);
-	}
+    private final Function<ResourceID, Boolean> stopWorkerFunction;
 
-	@Override
-	protected void initialize() throws ResourceManagerException {
-		// noop
-	}
+    public TestingResourceManager(
+            RpcService rpcService,
+            UUID leaderSessionId,
+            ResourceID resourceId,
+            HeartbeatServices heartbeatServices,
+            SlotManager slotManager,
+            ResourceManagerPartitionTrackerFactory clusterPartitionTrackerFactory,
+            JobLeaderIdService jobLeaderIdService,
+            FatalErrorHandler fatalErrorHandler,
+            ResourceManagerMetricGroup resourceManagerMetricGroup,
+            Function<ResourceID, Boolean> stopWorkerFunction) {
+        super(
+                rpcService,
+                leaderSessionId,
+                resourceId,
+                heartbeatServices,
+                slotManager,
+                clusterPartitionTrackerFactory,
+                jobLeaderIdService,
+                new ClusterInformation("localhost", 1234),
+                fatalErrorHandler,
+                resourceManagerMetricGroup,
+                RpcUtils.INF_TIMEOUT,
+                ForkJoinPool.commonPool());
 
-	@Override
-	protected void internalDeregisterApplication(ApplicationStatus finalStatus, @Nullable String diagnostics) throws ResourceManagerException {
-		// noop
-	}
+        this.stopWorkerFunction = stopWorkerFunction;
+    }
 
-	@Override
-	public boolean startNewWorker(WorkerResourceSpec workerResourceSpec) {
-		return false;
-	}
+    @Override
+    protected void initialize() throws ResourceManagerException {
+        // noop
+    }
 
-	@Override
-	protected ResourceID workerStarted(ResourceID resourceID) {
-		return resourceID;
-	}
+    @Override
+    protected void terminate() {
+        // noop
+    }
 
-	@Override
-	public boolean stopWorker(ResourceID worker) {
-		// cannot stop workers
-		return false;
-	}
+    @Override
+    protected void internalDeregisterApplication(
+            ApplicationStatus finalStatus, @Nullable String diagnostics)
+            throws ResourceManagerException {
+        // noop
+    }
+
+    @Override
+    public boolean startNewWorker(WorkerResourceSpec workerResourceSpec) {
+        return false;
+    }
+
+    @Override
+    protected ResourceID workerStarted(ResourceID resourceID) {
+        return resourceID;
+    }
+
+    @Override
+    public boolean stopWorker(ResourceID worker) {
+        return stopWorkerFunction.apply(worker);
+    }
 }

@@ -26,12 +26,12 @@ under the License.
 	<parent>
 		<groupId>org.apache.flink</groupId>
 		<artifactId>flink-connectors</artifactId>
-		<version>1.12-SNAPSHOT</version>
+		<version>1.15-SNAPSHOT</version>
 		<relativePath>..</relativePath>
 	</parent>
 
 	<artifactId>flink-sql-connector-hive-1.2.2_${scala.binary.version}</artifactId>
-	<name>flink-sql-connector-hive-1.2.2</name>
+	<name>Flink : Connectors : SQL : Hive 1.2.2</name>
 
 	<packaging>jar</packaging>
 
@@ -58,6 +58,11 @@ under the License.
 				<exclusion>
 					<groupId>org.pentaho</groupId>
 					<artifactId>pentaho-aggdesigner-algorithm</artifactId>
+				</exclusion>
+				<!-- Rely on the Guava version of Hadoop. -->
+				<exclusion>
+					<groupId>com.google.guava</groupId>
+					<artifactId>guava</artifactId>
 				</exclusion>
 			</exclusions>
 		</dependency>
@@ -87,7 +92,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.orc</groupId>
 			<artifactId>orc-core</artifactId>
-			<version>${hive.connector.orc.version}</version>
+			<version>${orc.version}</version>
 			<classifier>nohive</classifier>
 			<exclusions>
 				<exclusion>
@@ -107,9 +112,21 @@ under the License.
 		</dependency>
 
 		<dependency>
+			<groupId>org.apache.orc</groupId>
+			<artifactId>orc-shims</artifactId>
+			<version>${orc.version}</version>
+		</dependency>
+
+		<dependency>
 			<groupId>io.airlift</groupId>
 			<artifactId>aircompressor</artifactId>
 			<version>0.8</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.antlr</groupId>
+			<artifactId>antlr-runtime</artifactId>
+			<version>3.5.2</version>
 		</dependency>
 	</dependencies>
 
@@ -133,9 +150,27 @@ under the License.
 									<include>org.apache.hive:hive-metastore</include>
 									<include>org.apache.thrift:libfb303</include>
 									<include>org.apache.orc:orc-core</include>
+									<include>org.apache.orc:orc-shims</include>
 									<include>io.airlift:aircompressor</include>
+									<include>org.antlr:antlr-runtime</include>
 								</includes>
 							</artifactSet>
+							<filters>
+								<filter>
+									<!-- JSON is CatX so we're not allowed to bundle it in our jar -->
+									<artifact>org.apache.hive:hive-exec</artifact>
+									<excludes>
+										<exclude>org/json/**</exclude>
+									</excludes>
+								</filter>
+							</filters>
+							<relocations>
+								<!-- Guava dependencies that still end up in the shaded JAR are relocated to avoid clashes. -->
+								<relocation>
+									<pattern>com.google</pattern>
+									<shadedPattern>org.apache.flink.hive.shaded.com.google</shadedPattern>
+								</relocation>
+							</relocations>
 						</configuration>
 					</execution>
 				</executions>

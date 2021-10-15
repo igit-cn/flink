@@ -19,35 +19,45 @@ package org.apache.flink.runtime.metrics.groups;
 
 import org.apache.flink.util.Preconditions;
 
+import java.util.Map;
 import java.util.Set;
 
-/**
- * Encapsulates all settings that are defined per reporter.
- */
+/** Encapsulates all settings that are defined per reporter. */
 public class ReporterScopedSettings {
 
-	private final int reporterIndex;
+    private final int reporterIndex;
 
-	private final char delimiter;
+    private final char delimiter;
 
-	private Set<String> excludedVariables;
+    private final Set<String> excludedVariables;
 
-	public ReporterScopedSettings(int reporterIndex, char delimiter, Set<String> excludedVariables) {
-		this.excludedVariables = excludedVariables;
-		Preconditions.checkArgument(reporterIndex >= 0);
-		this.reporterIndex = reporterIndex;
-		this.delimiter = delimiter;
-	}
+    private final Map<String, String> additionalVariables;
 
-	public int getReporterIndex() {
-		return reporterIndex;
-	}
+    public ReporterScopedSettings(
+            int reporterIndex,
+            char delimiter,
+            Set<String> excludedVariables,
+            Map<String, String> additionalVariables) {
+        this.excludedVariables = excludedVariables;
+        Preconditions.checkArgument(reporterIndex >= 0);
+        this.reporterIndex = reporterIndex;
+        this.delimiter = delimiter;
+        this.additionalVariables = additionalVariables;
+    }
 
-	public char getDelimiter() {
-		return delimiter;
-	}
+    public int getReporterIndex() {
+        return reporterIndex;
+    }
 
-	public Set<String> getExcludedVariables() {
-		return excludedVariables;
-	}
+    public char getDelimiter() {
+        return delimiter;
+    }
+
+    public Set<String> getExcludedVariables() {
+        return excludedVariables;
+    }
+
+    public Map<String, String> getAdditionalVariables() {
+        return additionalVariables;
+    }
 }

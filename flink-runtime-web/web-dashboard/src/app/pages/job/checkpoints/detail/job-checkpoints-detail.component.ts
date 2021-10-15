@@ -17,13 +17,16 @@
  */
 
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnInit } from '@angular/core';
+import { forkJoin } from 'rxjs';
+import { first } from 'rxjs/operators';
+
 import {
   CheckPointCompletedStatisticsInterface,
   CheckPointDetailInterface,
   JobDetailCorrectInterface,
-  VerticesItemInterface
+  VerticesItemInterface,
+  CheckPointConfigInterface
 } from 'interfaces';
-import { first } from 'rxjs/operators';
 import { JobService } from 'services';
 
 @Component({
@@ -35,6 +38,7 @@ import { JobService } from 'services';
 export class JobCheckpointsDetailComponent implements OnInit {
   innerCheckPoint: CheckPointCompletedStatisticsInterface;
   jobDetail: JobDetailCorrectInterface;
+  checkPointType: string;
 
   @Input()
   set checkPoint(value) {
@@ -42,24 +46,42 @@ export class JobCheckpointsDetailComponent implements OnInit {
     this.refresh();
   }
 
-  get checkPoint() {
+  get checkPoint(): CheckPointCompletedStatisticsInterface {
     return this.innerCheckPoint;
   }
 
   checkPointDetail: CheckPointDetailInterface;
+  checkPointConfig: CheckPointConfigInterface;
   listOfVertex: VerticesItemInterface[] = [];
   isLoading = true;
 
-  trackVertexBy(_: number, node: VerticesItemInterface) {
+  trackVertexBy(_: number, node: VerticesItemInterface): string {
     return node.id;
   }
 
-  refresh() {
+  refresh(): void {
     this.isLoading = true;
     if (this.jobDetail && this.jobDetail.jid) {
-      this.jobService.loadCheckpointDetails(this.jobDetail.jid, this.checkPoint.id).subscribe(
-        data => {
-          this.checkPointDetail = data;
+      forkJoin([
+        this.jobService.loadCheckpointConfig(this.jobDetail.jid),
+        this.jobService.loadCheckpointDetails(this.jobDetail.jid, this.checkPoint.id)
+      ]).subscribe(
+        ([config, detail]) => {
+          this.checkPointConfig = config;
+          this.checkPointDetail = detail;
+          if (this.checkPointDetail.checkpoint_type === 'CHECKPOINT') {
+            if (this.checkPointConfig.unaligned_checkpoints) {
+              this.checkPointType = 'unaligned checkpoint';
+            } else {
+              this.checkPointType = 'aligned checkpoint';
+            }
+          } else if (this.checkPointDetail.checkpoint_type === 'SYNC_SAVEPOINT') {
+            this.checkPointType = 'savepoint on cancel';
+          } else if (this.checkPointDetail.checkpoint_type === 'SAVEPOINT') {
+            this.checkPointType = 'savepoint';
+          } else {
+            this.checkPointType = '-';
+          }
           this.isLoading = false;
           this.cdr.markForCheck();
         },
@@ -73,7 +95,7 @@ export class JobCheckpointsDetailComponent implements OnInit {
 
   constructor(private jobService: JobService, private cdr: ChangeDetectorRef) {}
 
-  ngOnInit() {
+  ngOnInit(): void {
     this.jobService.jobDetail$.pipe(first()).subscribe(data => {
       this.jobDetail = data;
       this.listOfVertex = data!.vertices;

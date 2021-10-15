@@ -19,7 +19,6 @@
 package org.apache.flink.streaming.connectors.elasticsearch.table;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.connectors.elasticsearch.ActionRequestFailureHandler;
 import org.apache.flink.streaming.connectors.elasticsearch.ElasticsearchSinkBase;
@@ -33,120 +32,138 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchOptions.BULK_FLUSH_BACKOFF_DELAY_OPTION;
-import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchOptions.BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION;
-import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchOptions.BULK_FLUSH_BACKOFF_TYPE_OPTION;
-import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchOptions.BULK_FLUSH_INTERVAL_OPTION;
-import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchOptions.FAILURE_HANDLER_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.BULK_FLUSH_BACKOFF_DELAY_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.BULK_FLUSH_BACKOFF_TYPE_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.BULK_FLUSH_INTERVAL_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.FAILURE_HANDLER_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.PASSWORD_OPTION;
+import static org.apache.flink.streaming.connectors.elasticsearch.table.ElasticsearchConnectorOptions.USERNAME_OPTION;
 
-/**
- * Accessor methods to elasticsearch options.
- */
+/** Accessor methods to elasticsearch options. */
 @Internal
 class ElasticsearchConfiguration {
-	protected final ReadableConfig config;
-	private final ClassLoader classLoader;
+    protected final ReadableConfig config;
+    private final ClassLoader classLoader;
 
-	ElasticsearchConfiguration(ReadableConfig config, ClassLoader classLoader) {
-		this.config = config;
-		this.classLoader = classLoader;
-	}
+    ElasticsearchConfiguration(ReadableConfig config, ClassLoader classLoader) {
+        this.config = config;
+        this.classLoader = classLoader;
+    }
 
-	public ActionRequestFailureHandler getFailureHandler() {
-		final ActionRequestFailureHandler failureHandler;
-		String value = config.get(FAILURE_HANDLER_OPTION);
-		switch (value.toUpperCase()) {
-			case "FAIL":
-				failureHandler = new NoOpFailureHandler();
-				break;
-			case "IGNORE":
-				failureHandler = new IgnoringFailureHandler();
-				break;
-			case "RETRY-REJECTED":
-				failureHandler = new RetryRejectedExecutionFailureHandler();
-				break;
-			default:
-				try {
-					Class<?> failureHandlerClass = Class.forName(value, false, classLoader);
-					failureHandler = (ActionRequestFailureHandler) InstantiationUtil.instantiate(failureHandlerClass);
-				} catch (ClassNotFoundException e) {
-					throw new ValidationException("Could not instantiate the failure handler class: " + value, e);
-				}
-				break;
-		}
-		return failureHandler;
-	}
+    public ActionRequestFailureHandler getFailureHandler() {
+        final ActionRequestFailureHandler failureHandler;
+        String value = config.get(FAILURE_HANDLER_OPTION);
+        switch (value.toUpperCase()) {
+            case "FAIL":
+                failureHandler = new NoOpFailureHandler();
+                break;
+            case "IGNORE":
+                failureHandler = new IgnoringFailureHandler();
+                break;
+            case "RETRY-REJECTED":
+                failureHandler = new RetryRejectedExecutionFailureHandler();
+                break;
+            default:
+                try {
+                    Class<?> failureHandlerClass = Class.forName(value, false, classLoader);
+                    failureHandler =
+                            (ActionRequestFailureHandler)
+                                    InstantiationUtil.instantiate(failureHandlerClass);
+                } catch (ClassNotFoundException e) {
+                    throw new ValidationException(
+                            "Could not instantiate the failure handler class: " + value, e);
+                }
+                break;
+        }
+        return failureHandler;
+    }
 
-	public String getDocumentType() {
-		return config.get(ElasticsearchOptions.DOCUMENT_TYPE_OPTION);
-	}
+    public String getDocumentType() {
+        return config.get(ElasticsearchConnectorOptions.DOCUMENT_TYPE_OPTION);
+    }
 
-	public Optional<Integer> getBulkFlushMaxActions() {
-		return config.getOptional(ElasticsearchOptions.BULK_FLUSH_MAX_ACTIONS_OPTION);
-	}
+    public int getBulkFlushMaxActions() {
+        int maxActions = config.get(ElasticsearchConnectorOptions.BULK_FLUSH_MAX_ACTIONS_OPTION);
+        // convert 0 to -1, because Elasticsearch client use -1 to disable this configuration.
+        return maxActions == 0 ? -1 : maxActions;
+    }
 
-	public Optional<Integer> getBulkFlushMaxSize() {
-		return config.getOptional(ElasticsearchOptions.BULK_FLASH_MAX_SIZE_OPTION).map(MemorySize::getMebiBytes);
-	}
+    public long getBulkFlushMaxByteSize() {
+        long maxSize =
+                config.get(ElasticsearchConnectorOptions.BULK_FLASH_MAX_SIZE_OPTION).getBytes();
+        // convert 0 to -1, because Elasticsearch client use -1 to disable this configuration.
+        return maxSize == 0 ? -1 : maxSize;
+    }
 
-	public Optional<Long> getBulkFlushInterval() {
-		return config.getOptional(BULK_FLUSH_INTERVAL_OPTION).map(Duration::toMillis);
-	}
+    public long getBulkFlushInterval() {
+        long interval = config.get(BULK_FLUSH_INTERVAL_OPTION).toMillis();
+        // convert 0 to -1, because Elasticsearch client use -1 to disable this configuration.
+        return interval == 0 ? -1 : interval;
+    }
 
-	public boolean isBulkFlushBackoffEnabled() {
-		return config.get(BULK_FLUSH_BACKOFF_TYPE_OPTION) != ElasticsearchOptions.BackOffType.DISABLED;
-	}
+    public Optional<String> getUsername() {
+        return config.getOptional(USERNAME_OPTION);
+    }
 
-	public Optional<ElasticsearchSinkBase.FlushBackoffType> getBulkFlushBackoffType() {
-		switch (config.get(BULK_FLUSH_BACKOFF_TYPE_OPTION)) {
-			case CONSTANT:
-				return Optional.of(ElasticsearchSinkBase.FlushBackoffType.CONSTANT);
-			case EXPONENTIAL:
-				return Optional.of(ElasticsearchSinkBase.FlushBackoffType.EXPONENTIAL);
-			default:
-				return Optional.empty();
-		}
-	}
+    public Optional<String> getPassword() {
+        return config.getOptional(PASSWORD_OPTION);
+    }
 
-	public Optional<Integer> getBulkFlushBackoffRetries() {
-		return config.getOptional(BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION);
-	}
+    public boolean isBulkFlushBackoffEnabled() {
+        return config.get(BULK_FLUSH_BACKOFF_TYPE_OPTION)
+                != ElasticsearchConnectorOptions.BackOffType.DISABLED;
+    }
 
-	public Optional<Long> getBulkFlushBackoffDelay() {
-		return config.getOptional(BULK_FLUSH_BACKOFF_DELAY_OPTION).map(Duration::toMillis);
-	}
+    public Optional<ElasticsearchSinkBase.FlushBackoffType> getBulkFlushBackoffType() {
+        switch (config.get(BULK_FLUSH_BACKOFF_TYPE_OPTION)) {
+            case CONSTANT:
+                return Optional.of(ElasticsearchSinkBase.FlushBackoffType.CONSTANT);
+            case EXPONENTIAL:
+                return Optional.of(ElasticsearchSinkBase.FlushBackoffType.EXPONENTIAL);
+            default:
+                return Optional.empty();
+        }
+    }
 
-	public boolean isDisableFlushOnCheckpoint() {
-		return !config.get(ElasticsearchOptions.FLUSH_ON_CHECKPOINT_OPTION);
-	}
+    public Optional<Integer> getBulkFlushBackoffRetries() {
+        return config.getOptional(BULK_FLUSH_BACKOFF_MAX_RETRIES_OPTION);
+    }
 
-	public String getIndex() {
-		return config.get(ElasticsearchOptions.INDEX_OPTION);
-	}
+    public Optional<Long> getBulkFlushBackoffDelay() {
+        return config.getOptional(BULK_FLUSH_BACKOFF_DELAY_OPTION).map(Duration::toMillis);
+    }
 
-	public String getKeyDelimiter() {
-		return config.get(ElasticsearchOptions.KEY_DELIMITER_OPTION);
-	}
+    public boolean isDisableFlushOnCheckpoint() {
+        return !config.get(ElasticsearchConnectorOptions.FLUSH_ON_CHECKPOINT_OPTION);
+    }
 
-	public Optional<String> getPathPrefix() {
-		return config.getOptional(ElasticsearchOptions.CONNECTION_PATH_PREFIX);
-	}
+    public String getIndex() {
+        return config.get(ElasticsearchConnectorOptions.INDEX_OPTION);
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (this == o) {
-			return true;
-		}
-		if (o == null || getClass() != o.getClass()) {
-			return false;
-		}
-		ElasticsearchConfiguration that = (ElasticsearchConfiguration) o;
-		return Objects.equals(config, that.config) &&
-			Objects.equals(classLoader, that.classLoader);
-	}
+    public String getKeyDelimiter() {
+        return config.get(ElasticsearchConnectorOptions.KEY_DELIMITER_OPTION);
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(config, classLoader);
-	}
+    public Optional<String> getPathPrefix() {
+        return config.getOptional(ElasticsearchConnectorOptions.CONNECTION_PATH_PREFIX);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        ElasticsearchConfiguration that = (ElasticsearchConfiguration) o;
+        return Objects.equals(config, that.config) && Objects.equals(classLoader, that.classLoader);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(config, classLoader);
+    }
 }

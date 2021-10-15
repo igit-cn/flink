@@ -18,7 +18,9 @@
 
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
+import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+
 import { BASE_URL, LONG_MIN_VALUE } from 'config';
 
 @Injectable({
@@ -29,10 +31,11 @@ export class MetricsService {
 
   /**
    * Get available metric list
+   *
    * @param jobId
    * @param vertexId
    */
-  getAllAvailableMetrics(jobId: string, vertexId: string) {
+  getAllAvailableMetrics(jobId: string, vertexId: string): Observable<Array<{ id: string; value: string }>> {
     return this.httpClient
       .get<Array<{ id: string; value: string }>>(`${BASE_URL}/jobs/${jobId}/vertices/${vertexId}/metrics`)
       .pipe(
@@ -54,11 +57,16 @@ export class MetricsService {
 
   /**
    * Get metric data
+   *
    * @param jobId
    * @param vertexId
    * @param listOfMetricName
    */
-  getMetrics(jobId: string, vertexId: string, listOfMetricName: string[]) {
+  getMetrics(
+    jobId: string,
+    vertexId: string,
+    listOfMetricName: string[]
+  ): Observable<{ timestamp: number; values: { [p: string]: number } }> {
     const metricName = listOfMetricName.join(',');
     return this.httpClient
       .get<Array<{ id: string; value: string }>>(
@@ -79,19 +87,66 @@ export class MetricsService {
   }
 
   /**
-   * Gets the watermarks for a given vertex id.
+   * Get aggregated metric data from all subtasks of the given vertexId
+   *
    * @param jobId
    * @param vertexId
+   * @param listOfMetricName
+   * @param aggregate
    */
-  getWatermarks(jobId: string, vertexId: string) {
+  getAggregatedMetrics(
+    jobId: string,
+    vertexId: string,
+    listOfMetricName: string[],
+    aggregate: string = 'max'
+  ): Observable<{ [p: string]: number }> {
+    const metricName = listOfMetricName.join(',');
     return this.httpClient
-      .get<Array<{ id: string; value: string }>>(
-        `${BASE_URL}/jobs/${jobId}/vertices/${vertexId}/watermarks`
+      .get<Array<{ id: string; min: number; max: number; avg: number; sum: number }>>(
+        `${BASE_URL}/jobs/${jobId}/vertices/${vertexId}/subtasks/metrics?get=${metricName}`
       )
       .pipe(
         map(arr => {
+          const result: { [id: string]: number } = {};
+          arr.forEach(item => {
+            switch (aggregate) {
+              case 'min':
+                result[item.id] = +item.min;
+                break;
+              case 'max':
+                result[item.id] = +item.max;
+                break;
+              case 'avg':
+                result[item.id] = +item.avg;
+                break;
+              case 'sum':
+                result[item.id] = +item.sum;
+                break;
+              default:
+                throw new Error(`Unsupported aggregate: ${aggregate}`);
+            }
+          });
+          return result;
+        })
+      );
+  }
+
+  /**
+   * Gets the watermarks for a given vertex id.
+   *
+   * @param jobId
+   * @param vertexId
+   */
+  getWatermarks(
+    jobId: string,
+    vertexId: string
+  ): Observable<{ lowWatermark: number; watermarks: { [p: string]: number } }> {
+    return this.httpClient
+      .get<Array<{ id: string; value: string }>>(`${BASE_URL}/jobs/${jobId}/vertices/${vertexId}/watermarks`)
+      .pipe(
+        map(arr => {
           let minValue = NaN;
-          let lowWatermark = NaN;
+          let lowWatermark: number;
           const watermarks: { [id: string]: number } = {};
           arr.forEach(item => {
             const value = parseInt(item.value, 10);
@@ -110,7 +165,7 @@ export class MetricsService {
             lowWatermark,
             watermarks
           };
-      })
-    );
+        })
+      );
   }
 }

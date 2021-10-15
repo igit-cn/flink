@@ -17,10 +17,11 @@
  */
 
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnDestroy, OnInit } from '@angular/core';
-import { JobDetailCorrectInterface } from 'interfaces';
 import { Subject } from 'rxjs';
 import { distinctUntilKeyChanged, takeUntil } from 'rxjs/operators';
-import { JobService } from 'services';
+
+import { JobDetailCorrectInterface } from 'interfaces';
+import { JobService, StatusService } from 'services';
 
 @Component({
   selector: 'flink-job-status',
@@ -55,29 +56,45 @@ export class JobStatusComponent implements OnInit, OnDestroy {
       title: 'Configuration'
     }
   ];
+  checkpointIndexOfNavigation = this.checkpointIndexOfNav();
 
-  cancelJob() {
+  webCancelEnabled = this.statusService.configuration.features['web-cancel'];
+
+  cancelJob(): void {
     this.jobService.cancelJob(this.jobDetail.jid).subscribe(() => {
       this.statusTips = 'Cancelling...';
       this.cdr.markForCheck();
     });
   }
 
-  constructor(private jobService: JobService, private cdr: ChangeDetectorRef) {}
+  constructor(private jobService: JobService, public statusService: StatusService, private cdr: ChangeDetectorRef) {}
 
-  ngOnInit() {
+  ngOnInit(): void {
     const jobDetail$ = this.jobService.jobDetail$.pipe(takeUntil(this.destroy$));
     jobDetail$.subscribe(data => {
       this.jobDetail = data;
       this.cdr.markForCheck();
+      var index = this.checkpointIndexOfNav();
+      if (data.plan.type == 'STREAMING' && index == -1) {
+        this.listOfNavigation.splice(this.checkpointIndexOfNavigation, 0, {
+          path: 'checkpoints',
+          title: 'Checkpoints'
+        });
+      } else if (data.plan.type == 'BATCH' && index > -1) {
+        this.listOfNavigation.splice(index, 1);
+      }
     });
     jobDetail$.pipe(distinctUntilKeyChanged('state')).subscribe(() => {
       this.statusTips = '';
     });
   }
 
-  ngOnDestroy() {
+  ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  checkpointIndexOfNav(): number {
+    return this.listOfNavigation.findIndex(item => item.path === 'checkpoints');
   }
 }

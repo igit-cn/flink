@@ -19,97 +19,201 @@
 package org.apache.flink.streaming.runtime.tasks;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.connector.source.SourceOutput;
+import org.apache.flink.api.connector.source.ExternallyInducedSourceReader;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
+import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.CheckpointType;
 import org.apache.flink.runtime.execution.Environment;
+import org.apache.flink.runtime.metrics.MetricNames;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
+import org.apache.flink.runtime.state.CheckpointStorageLocationReference;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.SourceOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
-import org.apache.flink.streaming.runtime.io.AbstractDataOutput;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput.DataOutput;
 import org.apache.flink.streaming.runtime.io.StreamOneInputProcessor;
+import org.apache.flink.streaming.runtime.io.StreamTaskExternallyInducedSourceInput;
 import org.apache.flink.streaming.runtime.io.StreamTaskInput;
 import org.apache.flink.streaming.runtime.io.StreamTaskSourceInput;
+import org.apache.flink.streaming.runtime.metrics.WatermarkGauge;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.streaming.runtime.streamstatus.StreamStatus;
-import org.apache.flink.streaming.runtime.streamstatus.StreamStatusMaintainer;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
+import org.apache.flink.util.concurrent.FutureUtils;
+
+import javax.annotation.Nullable;
+
+import java.util.concurrent.CompletableFuture;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/**
- * A subclass of {@link StreamTask} for executing the {@link SourceOperator}.
- */
+/** A subclass of {@link StreamTask} for executing the {@link SourceOperator}. */
 @Internal
 public class SourceOperatorStreamTask<T> extends StreamTask<T, SourceOperator<T, ?>> {
 
-	public SourceOperatorStreamTask(Environment env) throws Exception {
-		super(env);
-	}
+    private AsyncDataOutputToOutput<T> output;
+    private boolean isExternallyInducedSource;
 
-	@Override
-	public void init() {
-		StreamTaskInput<T> input = new StreamTaskSourceInput<>(headOperator);
-		DataOutput<T> output = new StreamTaskSourceOutput<>(
-			operatorChain.getChainEntryPoint(),
-			getStreamStatusMaintainer());
+    public SourceOperatorStreamTask(Environment env) throws Exception {
+        super(env);
+    }
 
-		inputProcessor = new StreamOneInputProcessor<>(
-			input,
-			output,
-			operatorChain);
-	}
+    @Override
+    public void init() throws Exception {
+        final SourceOperator<T, ?> sourceOperator = this.mainOperator;
+        // reader initialization, which cannot happen in the constructor due to the
+        // lazy metric group initialization. We do this here now, rather than
+        // later (in open()) so that we can access the reader when setting up the
+        // input processors
+        sourceOperator.initReader();
 
-	/**
-	 * Implementation of {@link DataOutput} that wraps a specific {@link Output} to emit
-	 * stream elements for {@link SourceOperator}.
-	 */
-	private static class StreamTaskSourceOutput<T> extends AbstractDataOutput<T> implements SourceOutput<T> {
+        final SourceReader<T, ?> sourceReader = sourceOperator.getSourceReader();
+        final StreamTaskInput<T> input;
 
-		private final Output<StreamRecord<T>> output;
+        // TODO: should the input be constructed inside the `OperatorChain` class?
+        if (operatorChain.isTaskDeployedAsFinished()) {
+            input = new StreamTaskFinishedOnRestoreSourceInput<>(sourceOperator, 0, 0);
+        } else if (sourceReader instanceof ExternallyInducedSourceReader) {
+            isExternallyInducedSource = true;
 
-		StreamTaskSourceOutput(
-				Output<StreamRecord<T>> output,
-				StreamStatusMaintainer streamStatusMaintainer) {
-			super(streamStatusMaintainer);
+            input =
+                    new StreamTaskExternallyInducedSourceInput<>(
+                            sourceOperator,
+                            this::triggerCheckpointForExternallyInducedSource,
+                            0,
+                            0);
+        } else {
+            input = new StreamTaskSourceInput<>(sourceOperator, 0, 0);
+        }
 
-			this.output = checkNotNull(output);
-		}
+        // The SourceOperatorStreamTask doesn't have any inputs, so there is no need for
+        // a WatermarkGauge on the input.
+        output =
+                new AsyncDataOutputToOutput<T>(
+                        operatorChain.getMainOperatorOutput(),
+                        sourceOperator.getSourceMetricGroup(),
+                        null);
 
-		@Override
-		public void emitRecord(StreamRecord<T> streamRecord) {
-			output.collect(streamRecord);
-		}
+        inputProcessor = new StreamOneInputProcessor<>(input, output, operatorChain);
 
-		@Override
-		public void emitLatencyMarker(LatencyMarker latencyMarker) {
-			output.emitLatencyMarker(latencyMarker);
-		}
+        getEnvironment()
+                .getMetricGroup()
+                .getIOMetricGroup()
+                .gauge(
+                        MetricNames.CHECKPOINT_START_DELAY_TIME,
+                        this::getAsyncCheckpointStartDelayNanos);
+    }
 
-		@Override
-		public void emitWatermark(Watermark watermark) {
-			output.emitWatermark(watermark);
-		}
+    @Override
+    protected void finishTask() throws Exception {
+        mailboxProcessor.allActionsCompleted();
+    }
 
-		// ------------------- methods from SourceOutput -------------
+    @Override
+    public CompletableFuture<Boolean> triggerCheckpointAsync(
+            CheckpointMetaData checkpointMetaData, CheckpointOptions checkpointOptions) {
+        if (!isExternallyInducedSource) {
+            if (checkpointOptions.getCheckpointType().shouldDrain()) {
+                return triggerStopWithSavepointWithDrainAsync(
+                        checkpointMetaData, checkpointOptions);
+            } else {
+                return super.triggerCheckpointAsync(checkpointMetaData, checkpointOptions);
+            }
+        } else {
+            return CompletableFuture.completedFuture(isRunning());
+        }
+    }
 
-		@Override
-		public void collect(T record) throws Exception {
-			output.collect(new StreamRecord<>(record));
-		}
+    private CompletableFuture<Boolean> triggerStopWithSavepointWithDrainAsync(
+            CheckpointMetaData checkpointMetaData, CheckpointOptions checkpointOptions) {
 
-		@Override
-		public void collect(T record, long timestamp) throws Exception {
-			output.collect(new StreamRecord<>(record, timestamp));
-		}
+        CompletableFuture<Void> operatorFinished = new CompletableFuture<>();
+        mainMailboxExecutor.execute(
+                () -> {
+                    setSynchronousSavepoint(checkpointMetaData.getCheckpointId(), true);
+                    FutureUtils.forward(mainOperator.stop(), operatorFinished);
+                },
+                "stop Flip-27 source for stop-with-savepoint --drain");
 
-		@Override
-		public void emitWatermark(org.apache.flink.api.common.eventtime.Watermark watermark) {
-			output.emitWatermark(new Watermark(watermark.getTimestamp()));
-		}
+        return assertTriggeringCheckpointExceptions(
+                operatorFinished.thenCompose(
+                        (ignore) ->
+                                super.triggerCheckpointAsync(
+                                        checkpointMetaData, checkpointOptions)),
+                checkpointMetaData.getCheckpointId());
+    }
 
-		@Override
-		public void markIdle() {
-			emitStreamStatus(StreamStatus.IDLE);
-		}
-	}
+    @Override
+    protected void advanceToEndOfEventTime() {
+        output.emitWatermark(Watermark.MAX_WATERMARK);
+    }
+
+    // --------------------------
+
+    private void triggerCheckpointForExternallyInducedSource(long checkpointId) {
+        final CheckpointOptions checkpointOptions =
+                CheckpointOptions.forConfig(
+                        CheckpointType.CHECKPOINT,
+                        CheckpointStorageLocationReference.getDefault(),
+                        configuration.isExactlyOnceCheckpointMode(),
+                        configuration.isUnalignedCheckpointsEnabled(),
+                        configuration.getAlignedCheckpointTimeout().toMillis());
+        final long timestamp = System.currentTimeMillis();
+
+        final CheckpointMetaData checkpointMetaData =
+                new CheckpointMetaData(checkpointId, timestamp, timestamp);
+
+        super.triggerCheckpointAsync(checkpointMetaData, checkpointOptions);
+    }
+
+    // ---------------------------
+
+    /** Implementation of {@link DataOutput} that wraps a specific {@link Output}. */
+    public static class AsyncDataOutputToOutput<T> implements DataOutput<T> {
+
+        private final Output<StreamRecord<T>> output;
+        private final InternalSourceReaderMetricGroup metricGroup;
+        @Nullable private final WatermarkGauge inputWatermarkGauge;
+        private final Counter numRecordsOut;
+
+        public AsyncDataOutputToOutput(
+                Output<StreamRecord<T>> output,
+                InternalSourceReaderMetricGroup metricGroup,
+                @Nullable WatermarkGauge inputWatermarkGauge) {
+
+            this.output = checkNotNull(output);
+            this.numRecordsOut = metricGroup.getIOMetricGroup().getNumRecordsOutCounter();
+            this.inputWatermarkGauge = inputWatermarkGauge;
+            this.metricGroup = metricGroup;
+        }
+
+        @Override
+        public void emitRecord(StreamRecord<T> streamRecord) {
+            numRecordsOut.inc();
+            metricGroup.recordEmitted(streamRecord.getTimestamp());
+            output.collect(streamRecord);
+        }
+
+        @Override
+        public void emitLatencyMarker(LatencyMarker latencyMarker) {
+            output.emitLatencyMarker(latencyMarker);
+        }
+
+        @Override
+        public void emitWatermark(Watermark watermark) {
+            long watermarkTimestamp = watermark.getTimestamp();
+            if (inputWatermarkGauge != null) {
+                inputWatermarkGauge.setCurrentWatermark(watermarkTimestamp);
+            }
+            metricGroup.watermarkEmitted(watermarkTimestamp);
+            output.emitWatermark(watermark);
+        }
+
+        @Override
+        public void emitWatermarkStatus(WatermarkStatus watermarkStatus) throws Exception {
+            output.emitWatermarkStatus(watermarkStatus);
+        }
+    }
 }

@@ -19,17 +19,27 @@
 package org.apache.flink.table.types.inference;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.inference.strategies.CommonTypeStrategy;
 import org.apache.flink.table.types.inference.strategies.ExplicitTypeStrategy;
+import org.apache.flink.table.types.inference.strategies.FirstTypeStrategy;
+import org.apache.flink.table.types.inference.strategies.ForceNullableTypeStrategy;
 import org.apache.flink.table.types.inference.strategies.MappingTypeStrategy;
+import org.apache.flink.table.types.inference.strategies.MatchFamilyTypeStrategy;
 import org.apache.flink.table.types.inference.strategies.MissingTypeStrategy;
+import org.apache.flink.table.types.inference.strategies.NullableIfArgsTypeStrategy;
 import org.apache.flink.table.types.inference.strategies.UseArgumentTypeStrategy;
+import org.apache.flink.table.types.inference.strategies.VaryingStringTypeStrategy;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.LogicalTypeFamily;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
-import java.util.List;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.IntStream;
+import java.util.function.Function;
+
+import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 
 /**
  * Strategies for inferring an output or accumulator data type of a function call.
@@ -39,76 +49,112 @@ import java.util.stream.IntStream;
 @Internal
 public final class TypeStrategies {
 
-	/**
-	 * Placeholder for a missing type strategy.
-	 */
-	public static final TypeStrategy MISSING = new MissingTypeStrategy();
+    /** Placeholder for a missing type strategy. */
+    public static final TypeStrategy MISSING = new MissingTypeStrategy();
 
-	/**
-	 * Type strategy that returns a fixed {@link DataType}.
-	 */
-	public static TypeStrategy explicit(DataType dataType) {
-		return new ExplicitTypeStrategy(dataType);
-	}
+    /** Type strategy that returns a common, least restrictive type of all arguments. */
+    public static final TypeStrategy COMMON = new CommonTypeStrategy();
 
-	/**
-	 * Type strategy that returns the n-th input argument.
-	 */
-	public static TypeStrategy argument(int pos) {
-		return new UseArgumentTypeStrategy(pos);
-	}
+    /** Type strategy that returns a fixed {@link DataType}. */
+    public static TypeStrategy explicit(DataType dataType) {
+        return new ExplicitTypeStrategy(dataType);
+    }
 
-	/**
-	 * Type strategy that maps an {@link InputTypeStrategy} to a {@link TypeStrategy} if the input strategy
-	 * infers identical types.
-	 */
-	public static TypeStrategy mapping(Map<InputTypeStrategy, TypeStrategy> mappings) {
-		return new MappingTypeStrategy(mappings);
-	}
+    /** Type strategy that returns the n-th input argument. */
+    public static TypeStrategy argument(int pos) {
+        return new UseArgumentTypeStrategy(pos);
+    }
 
-	// --------------------------------------------------------------------------------------------
-	// Specific type strategies
-	// --------------------------------------------------------------------------------------------
+    /** Type strategy that returns the first type that could be inferred. */
+    public static TypeStrategy first(TypeStrategy... strategies) {
+        return new FirstTypeStrategy(Arrays.asList(strategies));
+    }
 
-	/**
-	 * Type strategy that returns a {@link DataTypes#ROW()} with fields types equal to input types.
-	 */
-	public static final TypeStrategy ROW = callContext -> {
-		List<DataType> argumentDataTypes = callContext.getArgumentDataTypes();
-		DataTypes.Field[] fields = IntStream.range(0, argumentDataTypes.size())
-			.mapToObj(idx -> DataTypes.FIELD("f" + idx, argumentDataTypes.get(idx)))
-			.toArray(DataTypes.Field[]::new);
+    /** Type strategy that returns the given argument if it is of the same logical type family. */
+    public static TypeStrategy matchFamily(int argumentPos, LogicalTypeFamily family) {
+        return new MatchFamilyTypeStrategy(argumentPos, family);
+    }
 
-		return Optional.of(DataTypes.ROW(fields).notNull());
-	};
+    /**
+     * Type strategy that maps an {@link InputTypeStrategy} to a {@link TypeStrategy} if the input
+     * strategy infers identical types.
+     */
+    public static TypeStrategy mapping(Map<InputTypeStrategy, TypeStrategy> mappings) {
+        return new MappingTypeStrategy(mappings);
+    }
 
-	/**
-	 * Type strategy that returns a {@link DataTypes#MAP(DataType, DataType)} with a key type equal to type
-	 * of the first argument and a value type equal to the type of second argument.
-	 */
-	public static final TypeStrategy MAP = callContext -> {
-		List<DataType> argumentDataTypes = callContext.getArgumentDataTypes();
-		if (argumentDataTypes.size() < 2) {
-			return Optional.empty();
-		}
-		return Optional.of(DataTypes.MAP(argumentDataTypes.get(0), argumentDataTypes.get(1)).notNull());
-	};
+    /** Type strategy which forces the given {@param initialStrategy} to be nullable. */
+    public static TypeStrategy forceNullable(TypeStrategy initialStrategy) {
+        return new ForceNullableTypeStrategy(initialStrategy);
+    }
 
-	/**
-	 * Type strategy that returns a {@link DataTypes#ARRAY(DataType)} with element type equal to the type of
-	 * the first argument.
-	 */
-	public static final TypeStrategy ARRAY = callContext -> {
-		List<DataType> argumentDataTypes = callContext.getArgumentDataTypes();
-		if (argumentDataTypes.size() < 1) {
-			return Optional.empty();
-		}
-		return Optional.of(DataTypes.ARRAY(argumentDataTypes.get(0)).notNull());
-	};
+    /**
+     * A type strategy that can be used to make a result type nullable if any of the selected input
+     * arguments is nullable. Otherwise the type will be not null.
+     */
+    public static TypeStrategy nullableIfArgs(
+            ConstantArgumentCount includedArgs, TypeStrategy initialStrategy) {
+        return new NullableIfArgsTypeStrategy(includedArgs, initialStrategy, false);
+    }
 
-	// --------------------------------------------------------------------------------------------
+    /**
+     * A type strategy that can be used to make a result type nullable if any of the input arguments
+     * is nullable. Otherwise the type will be not null.
+     */
+    public static TypeStrategy nullableIfArgs(TypeStrategy initialStrategy) {
+        return nullableIfArgs(ConstantArgumentCount.any(), initialStrategy);
+    }
 
-	private TypeStrategies() {
-		// no instantiation
-	}
+    /**
+     * A type strategy that can be used to make a result type nullable if all the selected input
+     * arguments are nullable. Otherwise the type will be non-nullable.
+     */
+    public static TypeStrategy nullableIfAllArgs(
+            ConstantArgumentCount includedArgs, TypeStrategy initialStrategy) {
+        return new NullableIfArgsTypeStrategy(includedArgs, initialStrategy, true);
+    }
+
+    /**
+     * A type strategy that can be used to make a result type nullable if all the input arguments is
+     * nullable. Otherwise the type will be not null.
+     */
+    public static TypeStrategy nullableIfAllArgs(TypeStrategy initialStrategy) {
+        return nullableIfAllArgs(ConstantArgumentCount.any(), initialStrategy);
+    }
+
+    /**
+     * A type strategy that ensures that the result type is either {@link LogicalTypeRoot#VARCHAR}
+     * or {@link LogicalTypeRoot#VARBINARY} from their corresponding non-varying roots.
+     */
+    public static TypeStrategy varyingString(TypeStrategy initialStrategy) {
+        return new VaryingStringTypeStrategy(initialStrategy);
+    }
+
+    /**
+     * Type strategy specific for aggregations that partially produce different nullability
+     * depending whether the result is grouped or not.
+     */
+    public static TypeStrategy aggArg0(
+            Function<LogicalType, LogicalType> aggType, boolean nullableIfGroupingEmpty) {
+        return callContext -> {
+            final DataType argDataType = callContext.getArgumentDataTypes().get(0);
+            final LogicalType argType = argDataType.getLogicalType();
+            LogicalType result = aggType.apply(argType);
+            if (nullableIfGroupingEmpty && !callContext.isGroupedAggregation()) {
+                // null only if condition is met, otherwise arguments nullability
+                result = result.copy(true);
+            } else if (!nullableIfGroupingEmpty) {
+                // never null
+                result = result.copy(false);
+            }
+            return Optional.of(fromLogicalToDataType(result));
+        };
+    }
+
+    // --------------------------------------------------------------------------------------------
+
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
+    private TypeStrategies() {
+        // no instantiation
+    }
 }

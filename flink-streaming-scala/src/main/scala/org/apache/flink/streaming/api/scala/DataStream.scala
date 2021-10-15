@@ -23,16 +23,16 @@ import org.apache.flink.api.common.ExecutionConfig
 import org.apache.flink.api.common.eventtime.{TimestampAssigner, WatermarkGenerator, WatermarkStrategy}
 import org.apache.flink.api.common.functions.{FilterFunction, FlatMapFunction, MapFunction, Partitioner}
 import org.apache.flink.api.common.io.OutputFormat
-import org.apache.flink.api.common.operators.ResourceSpec
+import org.apache.flink.api.common.operators.{ResourceSpec, SlotSharingGroup}
 import org.apache.flink.api.common.serialization.SerializationSchema
 import org.apache.flink.api.common.state.MapStateDescriptor
 import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.api.connector.sink.Sink
 import org.apache.flink.api.java.functions.KeySelector
 import org.apache.flink.api.java.tuple.{Tuple => JavaTuple}
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable
 import org.apache.flink.api.scala.operators.ScalaCsvOutputFormat
 import org.apache.flink.core.fs.{FileSystem, Path}
-import org.apache.flink.streaming.api.collector.selector.OutputSelector
 import org.apache.flink.streaming.api.datastream.{AllWindowedStream => JavaAllWindowedStream, DataStream => JavaStream, KeyedStream => JavaKeyedStream, _}
 import org.apache.flink.streaming.api.functions.sink.SinkFunction
 import org.apache.flink.streaming.api.functions.timestamps.{AscendingTimestampExtractor, BoundedOutOfOrdernessTimestampExtractor}
@@ -41,7 +41,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator
 import org.apache.flink.streaming.api.windowing.assigners._
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.{GlobalWindow, TimeWindow, Window}
-import org.apache.flink.util.Collector
+import org.apache.flink.util.{CloseableIterator, Collector}
 
 import scala.collection.JavaConverters._
 
@@ -328,6 +328,29 @@ class DataStream[T](stream: JavaStream[T]) {
   }
 
   /**
+   * Sets the slot sharing group of this operation. Parallel instances of
+   * operations that are in the same slot sharing group will be co-located in the same
+   * TaskManager slot, if possible.
+   *
+   * Operations inherit the slot sharing group of input operations if all input operations
+   * are in the same slot sharing group and no slot sharing group was explicitly specified.
+   *
+   * Initially an operation is in the default slot sharing group. An operation can be put into
+   * the default group explicitly by setting the slot sharing group to `"default"`.
+   *
+   * @param slotSharingGroup Which contains name and its resource spec.
+   */
+  @PublicEvolving
+  def slotSharingGroup(slotSharingGroup: SlotSharingGroup): DataStream[T] = {
+    stream match {
+      case ds: SingleOutputStreamOperator[T] => ds.slotSharingGroup(slotSharingGroup)
+      case _ =>
+        throw new UnsupportedOperationException("Only supported for operators.")
+    }
+    this
+  }
+
+  /**
    * Sets the maximum time frequency (ms) for the flushing of the output
    * buffer. By default the output buffers flush only when they are full.
    *
@@ -559,7 +582,7 @@ class DataStream[T](stream: JavaStream[T]) {
    * stepfunction: initialStream => (feedback, output)
    *
    * A common pattern is to use output splitting to create feedback and output DataStream.
-   * Please refer to the [[split]] method of the DataStream
+   * Please see the side outputs of [[ProcessFunction]] method of the DataStream
    *
    * By default a DataStream with iteration will never terminate, but the user
    * can use the maxWaitTime parameter to set a max waiting time for the iteration head.
@@ -742,7 +765,12 @@ class DataStream[T](stream: JavaStream[T]) {
    * it possible to perform this operation in parallel).
    *
    * @param size The size of the window.
+   *
+   * @deprecated Please use [[windowAll()]] with either [[TumblingEventTimeWindows]] or
+   *             [[TumblingProcessingTimeWindows]]. For more information, see the deprecation
+   *             notice on [[org.apache.flink.streaming.api.TimeCharacteristic]].
    */
+  @deprecated
   def timeWindowAll(size: Time): AllWindowedStream[T, TimeWindow] = {
     new AllWindowedStream(javaStream.timeWindowAll(size))
   }
@@ -760,7 +788,12 @@ class DataStream[T](stream: JavaStream[T]) {
    * it possible to perform this operation in parallel).
    *
    * @param size The size of the window.
+   *
+   * @deprecated Please use [[windowAll()]] with either [[SlidingEventTimeWindows]] or
+   *             [[SlidingProcessingTimeWindows]]. For more information, see the deprecation
+   *             notice on [[org.apache.flink.streaming.api.TimeCharacteristic]].
    */
+  @deprecated
   def timeWindowAll(size: Time, slide: Time): AllWindowedStream[T, TimeWindow] = {
     new AllWindowedStream(javaStream.timeWindowAll(size, slide))
 
@@ -828,8 +861,8 @@ class DataStream[T](stream: JavaStream[T]) {
    * Periodically (defined by the [[ExecutionConfig#getAutoWatermarkInterval()]]), the
    * [[WatermarkGenerator#onPeriodicEmit(WatermarkOutput)]] method will be called.
    *
-   * Common watermark generation patterns can be found in the
-   * [[org.apache.flink.api.common.eventtime.WatermarkStrategies]] class.
+   * Common watermark generation patterns can be found as static methods in the
+   * [[org.apache.flink.api.common.eventtime.WatermarkStrategy]] class.
    */
   def assignTimestampsAndWatermarks(watermarkStrategy: WatermarkStrategy[T]): DataStream[T] = {
     val cleanedStrategy = clean(watermarkStrategy)
@@ -898,37 +931,6 @@ class DataStream[T](stream: JavaStream[T]) {
   }
 
   /**
-   *
-   * Operator used for directing tuples to specific named outputs using an
-   * OutputSelector. Calling this method on an operator creates a new
-   * [[SplitStream]].
-   *
-   * @deprecated Please use side output instead.
-   */
-  @deprecated
-  def split(selector: OutputSelector[T]): SplitStream[T] = asScalaStream(stream.split(selector))
-
-  /**
-   * Creates a new [[SplitStream]] that contains only the elements satisfying the
-   *  given output selector predicate.
-   *
-   * @deprecated Please use side output instead.
-   */
-  @deprecated
-  def split(fun: T => TraversableOnce[String]): SplitStream[T] = {
-    if (fun == null) {
-      throw new NullPointerException("OutputSelector must not be null.")
-    }
-    val cleanFun = clean(fun)
-    val selector = new OutputSelector[T] {
-      def select(in: T): java.lang.Iterable[String] = {
-        cleanFun(in).toIterable.asJava
-      }
-    }
-    split(selector)
-  }
-
-  /**
    * Creates a co-group operation. See [[CoGroupedStreams]] for an example of how the keys
    * and window can be specified.
    */
@@ -954,7 +956,7 @@ class DataStream[T](stream: JavaStream[T]) {
   def print(): DataStreamSink[T] = stream.print()
 
   /**
-   * Writes a DataStream to the standard output stream (stderr).
+   * Writes a DataStream to the standard error stream (stderr).
    *
    * For each element of the DataStream the result of
    * [[AnyRef.toString()]] is written.
@@ -976,7 +978,7 @@ class DataStream[T](stream: JavaStream[T]) {
   def print(sinkIdentifier: String): DataStreamSink[T] = stream.print(sinkIdentifier)
 
   /**
-    * Writes a DataStream to the standard output stream (stderr).
+    * Writes a DataStream to the standard error stream (stderr).
     *
     * For each element of the DataStream the result of
     * [[AnyRef.toString()]] is written.
@@ -1146,6 +1148,61 @@ class DataStream[T](stream: JavaStream[T]) {
     }
     this.addSink(sinkFunction)
   }
+
+  /**
+   * Adds the given sink to this DataStream. Only streams with sinks added
+   * will be executed once the StreamExecutionEnvironment.execute(...)
+   * method is called.
+   */
+  def sinkTo(sink: Sink[T, _, _, _]): DataStreamSink[T] = stream.sinkTo(sink)
+
+  /**
+   * Triggers the distributed execution of the streaming dataflow and returns an iterator over the
+   * elements of the given DataStream.
+   *
+   * <p>The DataStream application is executed in the regular distributed manner on the target
+   * environment, and the events from the stream are polled back to this application process and
+   * thread through Flink's REST API.
+   *
+   * <p><b>IMPORTANT</b> The returned iterator must be closed to free all cluster resources.
+   */
+  def executeAndCollect(): CloseableIterator[T] =
+    CloseableIterator.fromJava(stream.executeAndCollect())
+
+  /**
+   * Triggers the distributed execution of the streaming dataflow and returns an iterator over the
+   * elements of the given DataStream.
+   *
+   * <p>The DataStream application is executed in the regular distributed manner on the target
+   * environment, and the events from the stream are polled back to this application process and
+   * thread through Flink's REST API.
+   *
+   * <p><b>IMPORTANT</b> The returned iterator must be closed to free all cluster resources.
+   */
+  def executeAndCollect(jobExecutionName: String): CloseableIterator[T] =
+    CloseableIterator.fromJava(stream.executeAndCollect(jobExecutionName))
+
+  /**
+   * Triggers the distributed execution of the streaming dataflow and returns an iterator over the
+   * elements of the given DataStream.
+   *
+   * <p>The DataStream application is executed in the regular distributed manner on the target
+   * environment, and the events from the stream are polled back to this application process and
+   * thread through Flink's REST API.
+   */
+  def executeAndCollect(limit: Int): List[T] =
+    stream.executeAndCollect(limit).asScala.toList
+
+  /**
+   * Triggers the distributed execution of the streaming dataflow and returns an iterator over the
+   * elements of the given DataStream.
+   *
+   * <p>The DataStream application is executed in the regular distributed manner on the target
+   * environment, and the events from the stream are polled back to this application process and
+   * thread through Flink's REST API.
+   */
+  def executeAndCollect(jobExecutionName: String, limit: Int): List[T] =
+    stream.executeAndCollect(jobExecutionName, limit).asScala.toList
 
   /**
    * Returns a "closure-cleaned" version of the given function. Cleans only if closure cleaning

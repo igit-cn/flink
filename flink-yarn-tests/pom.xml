@@ -23,7 +23,7 @@ under the License.
 	<parent>
 		<groupId>org.apache.flink</groupId>
 		<artifactId>flink-parent</artifactId>
-		<version>1.12-SNAPSHOT</version>
+		<version>1.15-SNAPSHOT</version>
 		<relativePath>..</relativePath>
 	</parent>
 
@@ -34,7 +34,7 @@ under the License.
 	-->
 	
 	<artifactId>flink-yarn-tests</artifactId>
-	<name>flink-yarn-tests</name>
+	<name>Flink : Yarn Tests</name>
 	<packaging>jar</packaging>
 
 	<dependencies>
@@ -63,7 +63,7 @@ under the License.
 
 		<dependency>
 			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-runtime_${scala.binary.version}</artifactId>
+			<artifactId>flink-runtime</artifactId>
 			<version>${project.version}</version>
 			<scope>test</scope>
 			<type>test-jar</type>
@@ -411,12 +411,12 @@ under the License.
 							<overWriteSnapshots>true</overWriteSnapshots>
 						</configuration>
 					</execution>
-					<!-- Write classpath of flink-yarn to a file, so that the yarn tests can use it as their classpath
+					<!-- Write classpath of flink-yarn-tests to a file, so that the yarn tests can use it as their classpath
 						for the YARN "containers".
 					-->
 					<execution>
 						<id>store-classpath-in-target-for-tests</id>
-						<phase>package</phase>
+						<phase>process-test-resources</phase>
 						<goals>
 							<goal>build-classpath</goal>
 						</goals>

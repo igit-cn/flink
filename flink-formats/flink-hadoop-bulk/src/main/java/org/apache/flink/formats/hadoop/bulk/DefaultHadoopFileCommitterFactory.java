@@ -23,15 +23,25 @@ import org.apache.flink.formats.hadoop.bulk.committer.HadoopRenameFileCommitter;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 
-/**
- * The default hadoop file committer factory which always use {@link HadoopRenameFileCommitter}.
- */
+import java.io.IOException;
+
+/** The default hadoop file committer factory which always use {@link HadoopRenameFileCommitter}. */
 public class DefaultHadoopFileCommitterFactory implements HadoopFileCommitterFactory {
 
-	private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
-	@Override
-	public HadoopFileCommitter create(Configuration configuration, Path targetFilePath) {
-		return new HadoopRenameFileCommitter(configuration, targetFilePath);
-	}
+    @Override
+    public HadoopFileCommitter create(Configuration configuration, Path targetFilePath)
+            throws IOException {
+
+        return new HadoopRenameFileCommitter(configuration, targetFilePath);
+    }
+
+    @Override
+    public HadoopFileCommitter recoverForCommit(
+            Configuration configuration, Path targetFilePath, Path tempFilePath)
+            throws IOException {
+
+        return new HadoopRenameFileCommitter(configuration, targetFilePath, tempFilePath);
+    }
 }

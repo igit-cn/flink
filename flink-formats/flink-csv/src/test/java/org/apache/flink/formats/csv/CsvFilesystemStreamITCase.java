@@ -18,21 +18,18 @@
 
 package org.apache.flink.formats.csv;
 
-import org.apache.flink.table.planner.runtime.stream.FsStreamingSinkITCaseBase;
+import org.apache.flink.table.planner.runtime.stream.sql.StreamFileSystemITCaseBase;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * ITCase to test csv format for {@link CsvFileSystemFormatFactory} in stream mode.
- */
-public class CsvFilesystemStreamITCase extends FsStreamingSinkITCaseBase {
-	@Override
-	public String[] additionalProperties() {
-		List<String> ret = new ArrayList<>();
-		ret.add("'format'='csv'");
-		// for test purpose
-		ret.add("'sink.rolling-policy.file-size'='1'");
-		return ret.toArray(new String[0]);
-	}
+/** ITCase to test csv format for {@link CsvFileSystemFormatFactory} in stream mode. */
+public class CsvFilesystemStreamITCase extends StreamFileSystemITCaseBase {
+
+    @Override
+    public String[] formatProperties() {
+        List<String> ret = new ArrayList<>();
+        ret.add("'format'='csv'");
+        return ret.toArray(new String[0]);
+    }
 }

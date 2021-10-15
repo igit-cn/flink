@@ -22,67 +22,91 @@ import java.io.Serializable;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/**
- * Summary over <strong>all</strong> completed checkpoints.
- */
+/** Summary over <strong>all</strong> completed checkpoints. */
 public class CompletedCheckpointStatsSummary implements Serializable {
 
-	private static final long serialVersionUID = 5784360461635814038L;
+    private static final long serialVersionUID = 5784360461635814038L;
 
-	/** State size statistics for all completed checkpoints. */
-	private final MinMaxAvgStats stateSize;
+    private static final int HISTOGRAM_WINDOW_SIZE = 10_000; // ~300Kb per job with four histograms
 
-	/** Duration statistics for all completed checkpoints. */
-	private final MinMaxAvgStats duration;
+    /** State size statistics for all completed checkpoints. */
+    private final StatsSummary stateSize;
 
-	CompletedCheckpointStatsSummary() {
-		this(new MinMaxAvgStats(), new MinMaxAvgStats());
-	}
+    /** Duration statistics for all completed checkpoints. */
+    private final StatsSummary duration;
 
-	private CompletedCheckpointStatsSummary(
-			MinMaxAvgStats stateSize,
-			MinMaxAvgStats duration) {
+    private final StatsSummary processedData;
 
-		this.stateSize = checkNotNull(stateSize);
-		this.duration = checkNotNull(duration);
-	}
+    private final StatsSummary persistedData;
 
-	/**
-	 * Updates the summary with the given completed checkpoint.
-	 *
-	 * @param completed Completed checkpoint to update the summary with.
-	 */
-	void updateSummary(CompletedCheckpointStats completed) {
-		stateSize.add(completed.getStateSize());
-		duration.add(completed.getEndToEndDuration());
-	}
+    CompletedCheckpointStatsSummary() {
+        this(
+                new StatsSummary(HISTOGRAM_WINDOW_SIZE),
+                new StatsSummary(HISTOGRAM_WINDOW_SIZE),
+                new StatsSummary(HISTOGRAM_WINDOW_SIZE),
+                new StatsSummary(HISTOGRAM_WINDOW_SIZE));
+    }
 
-	/**
-	 * Creates a snapshot of the current state.
-	 *
-	 * @return A snapshot of the current state.
-	 */
-	CompletedCheckpointStatsSummary createSnapshot() {
-		return new CompletedCheckpointStatsSummary(
-				stateSize.createSnapshot(),
-				duration.createSnapshot());
-	}
+    private CompletedCheckpointStatsSummary(
+            StatsSummary stateSize,
+            StatsSummary duration,
+            StatsSummary processedData,
+            StatsSummary persistedData) {
 
-	/**
-	 * Returns the summary stats for the state size of completed checkpoints.
-	 *
-	 * @return Summary stats for the state size.
-	 */
-	public MinMaxAvgStats getStateSizeStats() {
-		return stateSize;
-	}
+        this.stateSize = checkNotNull(stateSize);
+        this.duration = checkNotNull(duration);
+        this.processedData = checkNotNull(processedData);
+        this.persistedData = checkNotNull(persistedData);
+    }
 
-	/**
-	 * Returns the summary stats for the duration of completed checkpoints.
-	 *
-	 * @return Summary stats for the duration.
-	 */
-	public MinMaxAvgStats getEndToEndDurationStats() {
-		return duration;
-	}
+    /**
+     * Updates the summary with the given completed checkpoint.
+     *
+     * @param completed Completed checkpoint to update the summary with.
+     */
+    void updateSummary(CompletedCheckpointStats completed) {
+        stateSize.add(completed.getStateSize());
+        duration.add(completed.getEndToEndDuration());
+        processedData.add(completed.getProcessedData());
+        persistedData.add(completed.getPersistedData());
+    }
+
+    /**
+     * Creates a snapshot of the current state.
+     *
+     * @return A snapshot of the current state.
+     */
+    CompletedCheckpointStatsSummarySnapshot createSnapshot() {
+        return new CompletedCheckpointStatsSummarySnapshot(
+                duration.createSnapshot(),
+                processedData.createSnapshot(),
+                persistedData.createSnapshot(),
+                stateSize.createSnapshot());
+    }
+
+    /**
+     * Returns the summary stats for the state size of completed checkpoints.
+     *
+     * @return Summary stats for the state size.
+     */
+    public StatsSummary getStateSizeStats() {
+        return stateSize;
+    }
+
+    /**
+     * Returns the summary stats for the duration of completed checkpoints.
+     *
+     * @return Summary stats for the duration.
+     */
+    public StatsSummary getEndToEndDurationStats() {
+        return duration;
+    }
+
+    public StatsSummary getProcessedDataStats() {
+        return processedData;
+    }
+
+    public StatsSummary getPersistedDataStats() {
+        return persistedData;
+    }
 }

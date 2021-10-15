@@ -27,10 +27,8 @@ import org.apache.flink.annotation.Public;
 @Public
 public final class RecordTimestampAssigner<E> implements TimestampAssigner<E> {
 
-	private static final long serialVersionUID = 1L;
-
-	@Override
-	public long extractTimestamp(E element, long recordTimestamp) {
-		return recordTimestamp;
-	}
+    @Override
+    public long extractTimestamp(E element, long recordTimestamp) {
+        return recordTimestamp;
+    }
 }

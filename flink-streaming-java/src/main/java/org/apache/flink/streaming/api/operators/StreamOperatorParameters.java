@@ -25,51 +25,64 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 
+import javax.annotation.Nullable;
+
+import java.util.function.Supplier;
+
 /**
- * Helper  class to construct {@link AbstractStreamOperatorV2}. Wraps couple of internal parameters
+ * Helper class to construct {@link AbstractStreamOperatorV2}. Wraps couple of internal parameters
  * to simplify for users construction of classes extending {@link AbstractStreamOperatorV2} and to
  * allow for backward compatible changes in the {@link AbstractStreamOperatorV2}'s constructor.
  *
- * @param <OUT> The output type of an operator that will be constructed using {@link StreamOperatorParameters}.
+ * @param <OUT> The output type of an operator that will be constructed using {@link
+ *     StreamOperatorParameters}.
  */
 @Experimental
 public class StreamOperatorParameters<OUT> {
-	private final StreamTask<?, ?> containingTask;
-	private final StreamConfig config;
-	private final Output<StreamRecord<OUT>> output;
-	private final ProcessingTimeService processingTimeService;
-	private final OperatorEventDispatcher operatorEventDispatcher;
+    private final StreamTask<?, ?> containingTask;
+    private final StreamConfig config;
+    private final Output<StreamRecord<OUT>> output;
+    private final Supplier<ProcessingTimeService> processingTimeServiceFactory;
+    private final OperatorEventDispatcher operatorEventDispatcher;
 
-	public StreamOperatorParameters(
-			StreamTask<?, ?> containingTask,
-			StreamConfig config,
-			Output<StreamRecord<OUT>> output,
-			ProcessingTimeService processingTimeService,
-			OperatorEventDispatcher operatorEventDispatcher) {
-		this.containingTask = containingTask;
-		this.config = config;
-		this.output = output;
-		this.processingTimeService = processingTimeService;
-		this.operatorEventDispatcher = operatorEventDispatcher;
-	}
+    /**
+     * The ProcessingTimeService, lazily created, but cached so that we don't create more than one.
+     */
+    @Nullable private ProcessingTimeService processingTimeService;
 
-	public StreamTask<?, ?> getContainingTask() {
-		return containingTask;
-	}
+    public StreamOperatorParameters(
+            StreamTask<?, ?> containingTask,
+            StreamConfig config,
+            Output<StreamRecord<OUT>> output,
+            Supplier<ProcessingTimeService> processingTimeServiceFactory,
+            OperatorEventDispatcher operatorEventDispatcher) {
+        this.containingTask = containingTask;
+        this.config = config;
+        this.output = output;
+        this.processingTimeServiceFactory = processingTimeServiceFactory;
+        this.operatorEventDispatcher = operatorEventDispatcher;
+    }
 
-	public StreamConfig getStreamConfig() {
-		return config;
-	}
+    public StreamTask<?, ?> getContainingTask() {
+        return containingTask;
+    }
 
-	public Output<StreamRecord<OUT>> getOutput() {
-		return output;
-	}
+    public StreamConfig getStreamConfig() {
+        return config;
+    }
 
-	public ProcessingTimeService getProcessingTimeService() {
-		return processingTimeService;
-	}
+    public Output<StreamRecord<OUT>> getOutput() {
+        return output;
+    }
 
-	public OperatorEventDispatcher getOperatorEventDispatcher() {
-		return operatorEventDispatcher;
-	}
+    public ProcessingTimeService getProcessingTimeService() {
+        if (processingTimeService == null) {
+            processingTimeService = processingTimeServiceFactory.get();
+        }
+        return processingTimeService;
+    }
+
+    public OperatorEventDispatcher getOperatorEventDispatcher() {
+        return operatorEventDispatcher;
+    }
 }

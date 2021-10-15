@@ -20,6 +20,9 @@ package org.apache.flink.connector.jdbc.internal.executor;
 
 import org.apache.flink.connector.jdbc.JdbcStatementBuilder;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -28,55 +31,59 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * A {@link JdbcBatchStatementExecutor} that extracts SQL keys from the supplied stream elements and executes a SQL query for them.
+ * A {@link JdbcBatchStatementExecutor} that extracts SQL keys from the supplied stream elements and
+ * executes a SQL query for them.
  */
 class KeyedBatchStatementExecutor<T, K> implements JdbcBatchStatementExecutor<T> {
 
-	private final String sql;
-	private final JdbcStatementBuilder<K> parameterSetter;
-	private final Function<T, K> keyExtractor;
+    private static final Logger LOG = LoggerFactory.getLogger(KeyedBatchStatementExecutor.class);
 
-	private transient Set<K> batch = new HashSet<>();
-	private transient PreparedStatement st;
+    private final String sql;
+    private final JdbcStatementBuilder<K> parameterSetter;
+    private final Function<T, K> keyExtractor;
+    private final Set<K> batch;
 
-	/**
-	 * Keep in mind object reuse: if it's on then key extractor may be required to return new object.
-	 */
-	KeyedBatchStatementExecutor(String sql, Function<T, K> keyExtractor, JdbcStatementBuilder<K> statementBuilder) {
-		this.parameterSetter = statementBuilder;
-		this.keyExtractor = keyExtractor;
-		this.sql = sql;
-	}
+    private transient PreparedStatement st;
 
-	@Override
-	public void open(Connection connection) throws SQLException {
-		batch = new HashSet<>();
-		st = connection.prepareStatement(sql);
-	}
+    /**
+     * Keep in mind object reuse: if it's on then key extractor may be required to return new
+     * object.
+     */
+    KeyedBatchStatementExecutor(
+            String sql, Function<T, K> keyExtractor, JdbcStatementBuilder<K> statementBuilder) {
+        this.parameterSetter = statementBuilder;
+        this.keyExtractor = keyExtractor;
+        this.sql = sql;
+        this.batch = new HashSet<>();
+    }
 
-	@Override
-	public void addToBatch(T record) {
-		batch.add(keyExtractor.apply(record));
-	}
+    @Override
+    public void prepareStatements(Connection connection) throws SQLException {
+        st = connection.prepareStatement(sql);
+    }
 
-	@Override
-	public void executeBatch() throws SQLException {
-		if (!batch.isEmpty()) {
-			for (K entry : batch) {
-				parameterSetter.accept(st, entry);
-				st.addBatch();
-			}
-			st.executeBatch();
-			batch.clear();
-		}
-	}
+    @Override
+    public void addToBatch(T record) {
+        batch.add(keyExtractor.apply(record));
+    }
 
-	@Override
-	public void close() throws SQLException {
-		if (st != null) {
-			st.close();
-			st = null;
-		}
-	}
+    @Override
+    public void executeBatch() throws SQLException {
+        if (!batch.isEmpty()) {
+            for (K entry : batch) {
+                parameterSetter.accept(st, entry);
+                st.addBatch();
+            }
+            st.executeBatch();
+            batch.clear();
+        }
+    }
 
+    @Override
+    public void closeStatements() throws SQLException {
+        if (st != null) {
+            st.close();
+            st = null;
+        }
+    }
 }

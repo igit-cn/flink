@@ -28,9 +28,11 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin, Observable, of, Subject } from 'rxjs';
 import { catchError, filter, map, takeUntil } from 'rxjs/operators';
+
+import { DagreComponent } from 'share/common/dagre/dagre.component';
+
 import { NodesItemCorrectInterface, NodesItemLinkInterface } from 'interfaces';
 import { JobService, MetricsService } from 'services';
-import { DagreComponent } from 'share/common/dagre/dagre.component';
 
 @Component({
   selector: 'flink-job-overview',
@@ -39,7 +41,7 @@ import { DagreComponent } from 'share/common/dagre/dagre.component';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class JobOverviewComponent implements OnInit, OnDestroy {
-  @ViewChild(DagreComponent) dagreComponent: DagreComponent;
+  @ViewChild(DagreComponent, { static: true }) dagreComponent: DagreComponent;
   nodes: NodesItemCorrectInterface[] = [];
   links: NodesItemLinkInterface[] = [];
   destroy$ = new Subject();
@@ -48,18 +50,36 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
   jobId: string;
   timeoutId: number;
 
-  onNodeClick(node: NodesItemCorrectInterface) {
+  onNodeClick(node: NodesItemCorrectInterface): void {
     if (!(this.selectedNode && this.selectedNode.id === node.id)) {
       this.router.navigate([node.id], { relativeTo: this.activatedRoute }).then();
     }
   }
 
-  onResizeEnd() {
+  onResizeEnd(): void {
     if (!this.selectedNode) {
       this.dagreComponent.moveToCenter();
     } else {
       this.dagreComponent.focusNode(this.selectedNode, true);
     }
+  }
+
+  mergeWithBackPressure(nodes: NodesItemCorrectInterface[]): Observable<NodesItemCorrectInterface[]> {
+    return forkJoin(
+      nodes.map(node => {
+        return this.metricService
+          .getAggregatedMetrics(this.jobId, node.id, ['backPressuredTimeMsPerSecond', 'busyTimeMsPerSecond'])
+          .pipe(
+            map(result => {
+              return {
+                ...node,
+                backPressuredPercentage: Math.min(Math.round(result.backPressuredTimeMsPerSecond / 10), 100),
+                busyPercentage: Math.min(Math.round(result.busyTimeMsPerSecond / 10), 100)
+              };
+            })
+          );
+      })
+    ).pipe(catchError(() => of(nodes)));
   }
 
   mergeWithWatermarks(nodes: NodesItemCorrectInterface[]): Observable<NodesItemCorrectInterface[]> {
@@ -74,10 +94,12 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
     ).pipe(catchError(() => of(nodes)));
   }
 
-  refreshNodesWithWatermarks() {
-    this.mergeWithWatermarks(this.nodes).subscribe(nodes => {
-      nodes.forEach(node => {
-        this.dagreComponent.updateNode(node.id, node);
+  refreshNodesWithMetrics(): void {
+    this.mergeWithBackPressure(this.nodes).subscribe(nodes => {
+      this.mergeWithWatermarks(nodes).subscribe(nodes2 => {
+        nodes2.forEach(node => {
+          this.dagreComponent.updateNode(node.id, node);
+        });
       });
     });
   }
@@ -91,7 +113,7 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef
   ) {}
 
-  ngOnInit() {
+  ngOnInit(): void {
     this.jobService.jobDetail$
       .pipe(
         filter(job => job.jid === this.activatedRoute.parent!.parent!.snapshot.params.jid),
@@ -103,10 +125,10 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
           this.links = data.plan.links;
           this.jobId = data.plan.jid;
           this.dagreComponent.flush(this.nodes, this.links, true).then();
-          this.refreshNodesWithWatermarks();
+          this.refreshNodesWithMetrics();
         } else {
           this.nodes = data.plan.nodes;
-          this.refreshNodesWithWatermarks();
+          this.refreshNodesWithMetrics();
         }
         this.cdr.markForCheck();
       });
@@ -121,7 +143,7 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
     });
   }
 
-  ngOnDestroy() {
+  ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
     clearTimeout(this.timeoutId);

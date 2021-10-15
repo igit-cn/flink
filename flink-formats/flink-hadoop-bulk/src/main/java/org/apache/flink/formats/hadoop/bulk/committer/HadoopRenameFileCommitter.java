@@ -25,83 +25,102 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
 import java.io.IOException;
+import java.util.UUID;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
- * The Hadoop file committer that directly rename the in-progress file
- * to the target file. For FileSystem like S3, renaming may lead to
- * additional copies.
+ * The Hadoop file committer that directly rename the in-progress file to the target file. For
+ * FileSystem like S3, renaming may lead to additional copies.
  */
 public class HadoopRenameFileCommitter implements HadoopFileCommitter {
 
-	private final Configuration configuration;
+    private final Configuration configuration;
 
-	private final Path targetFilePath;
+    private final Path targetFilePath;
 
-	private final Path inProgressFilePath;
+    private final Path tempFilePath;
 
-	public HadoopRenameFileCommitter(Configuration configuration, Path targetFilePath) {
-		this.configuration = configuration;
-		this.targetFilePath = targetFilePath;
-		this.inProgressFilePath = generateInProgressFilePath();
-	}
+    public HadoopRenameFileCommitter(Configuration configuration, Path targetFilePath)
+            throws IOException {
+        this.configuration = configuration;
+        this.targetFilePath = targetFilePath;
+        this.tempFilePath = generateTempFilePath();
+    }
 
-	@Override
-	public Path getTargetFilePath() {
-		return targetFilePath;
-	}
+    public HadoopRenameFileCommitter(
+            Configuration configuration, Path targetFilePath, Path inProgressPath)
+            throws IOException {
 
-	@Override
-	public Path getInProgressFilePath() {
-		return inProgressFilePath;
-	}
+        this.configuration = configuration;
+        this.targetFilePath = targetFilePath;
+        this.tempFilePath = inProgressPath;
+    }
 
-	@Override
-	public void preCommit() {
-		// Do nothing.
-	}
+    @Override
+    public Path getTargetFilePath() {
+        return targetFilePath;
+    }
 
-	@Override
-	public void commit() throws IOException {
-		rename(true);
-	}
+    @Override
+    public Path getTempFilePath() {
+        return tempFilePath;
+    }
 
-	@Override
-	public void commitAfterRecovery() throws IOException {
-		rename(false);
-	}
+    @Override
+    public void preCommit() {
+        // Do nothing.
+    }
 
-	private void rename(boolean assertFileExists) throws IOException {
-		FileSystem fileSystem = FileSystem.get(targetFilePath.toUri(), configuration);
+    @Override
+    public void commit() throws IOException {
+        rename(true);
+    }
 
-		if (!fileSystem.exists(inProgressFilePath)) {
-			if (assertFileExists) {
-				throw new IOException(String.format("In progress file(%s) not exists.", inProgressFilePath));
-			} else {
+    @Override
+    public void commitAfterRecovery() throws IOException {
+        rename(false);
+    }
 
-				// By pass the re-commit if source file not exists.
-				// TODO: in the future we may also need to check if the target file exists.
-				return;
-			}
-		}
+    private void rename(boolean assertFileExists) throws IOException {
+        FileSystem fileSystem = FileSystem.get(targetFilePath.toUri(), configuration);
 
-		try {
-			// If file exists, it will be overwritten.
-			fileSystem.rename(inProgressFilePath, targetFilePath);
-		} catch (IOException e) {
-			throw new IOException(
-				String.format("Could not commit file from %s to %s", inProgressFilePath, targetFilePath),
-				e);
-		}
-	}
+        if (!fileSystem.exists(tempFilePath)) {
+            if (assertFileExists) {
+                throw new IOException(
+                        String.format("In progress file(%s) not exists.", tempFilePath));
+            } else {
+                // By pass the re-commit if source file not exists.
+                // TODO: in the future we may also need to check if the target file exists.
+                return;
+            }
+        }
 
-	private Path generateInProgressFilePath() {
-		checkArgument(targetFilePath.isAbsolute(), "Target file must be absolute");
+        try {
+            // If file exists, it will be overwritten.
+            fileSystem.rename(tempFilePath, targetFilePath);
+        } catch (IOException e) {
+            throw new IOException(
+                    String.format(
+                            "Could not commit file from %s to %s", tempFilePath, targetFilePath),
+                    e);
+        }
+    }
 
-		Path parent = targetFilePath.getParent();
-		String name = targetFilePath.getName();
+    private Path generateTempFilePath() throws IOException {
+        checkArgument(targetFilePath.isAbsolute(), "Target file must be absolute");
 
-		return new Path(parent, "." + name + ".inprogress");
-	}
+        FileSystem fileSystem = FileSystem.get(targetFilePath.toUri(), configuration);
+
+        Path parent = targetFilePath.getParent();
+        String name = targetFilePath.getName();
+
+        while (true) {
+            Path candidate =
+                    new Path(parent, "." + name + ".inprogress." + UUID.randomUUID().toString());
+            if (!fileSystem.exists(candidate)) {
+                return candidate;
+            }
+        }
+    }
 }

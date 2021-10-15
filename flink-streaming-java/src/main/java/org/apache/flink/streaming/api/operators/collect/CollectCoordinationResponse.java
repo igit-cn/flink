@@ -21,81 +21,74 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
+import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * A {@link CoordinationResponse} from the coordinator containing the required batch or new results
  * and other necessary information in serialized form.
  *
- * <p>For an explanation of this communication protocol, see Java docs in {@link CollectSinkFunction}.
+ * <p>For an explanation of this communication protocol, see Java docs in {@link
+ * CollectSinkFunction}.
  */
-public class CollectCoordinationResponse<T> implements CoordinationResponse {
+public class CollectCoordinationResponse implements CoordinationResponse {
 
-	private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
-	private static final TypeSerializer<String> versionSerializer = StringSerializer.INSTANCE;
-	private static final TypeSerializer<Long> offsetSerializer = LongSerializer.INSTANCE;
+    private static final TypeSerializer<String> versionSerializer = StringSerializer.INSTANCE;
+    private static final TypeSerializer<Long> offsetSerializer = LongSerializer.INSTANCE;
+    private static final ListSerializer<byte[]> bufferSerializer =
+            new ListSerializer<>(BytePrimitiveArraySerializer.INSTANCE);
 
-	private final String version;
-	private final long lastCheckpointedOffset;
-	private final byte[] resultBytes;
+    private final String version;
+    private final long lastCheckpointedOffset;
+    private final List<byte[]> serializedResults;
 
-	public CollectCoordinationResponse(
-			String version,
-			long lastCheckpointedOffset,
-			List<T> results,
-			TypeSerializer<T> elementSerializer) throws IOException {
-		this.version = version;
-		this.lastCheckpointedOffset = lastCheckpointedOffset;
+    public CollectCoordinationResponse(
+            String version, long lastCheckpointedOffset, List<byte[]> serializedResults) {
+        this.version = version;
+        this.lastCheckpointedOffset = lastCheckpointedOffset;
+        this.serializedResults = serializedResults;
+    }
 
-		ListSerializer<T> listSerializer = new ListSerializer<>(elementSerializer);
-		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-		DataOutputViewStreamWrapper wrapper = new DataOutputViewStreamWrapper(baos);
-		listSerializer.serialize(results, wrapper);
-		this.resultBytes = baos.toByteArray();
-	}
+    public CollectCoordinationResponse(DataInputView inView) throws IOException {
+        this.version = versionSerializer.deserialize(inView);
+        this.lastCheckpointedOffset = offsetSerializer.deserialize(inView);
+        this.serializedResults = bufferSerializer.deserialize(inView);
+    }
 
-	public CollectCoordinationResponse(DataInputView inView) throws IOException {
-		this.version = versionSerializer.deserialize(inView);
-		this.lastCheckpointedOffset = offsetSerializer.deserialize(inView);
+    public String getVersion() {
+        return version;
+    }
 
-		int size = inView.readInt();
-		this.resultBytes = new byte[size];
-		inView.readFully(resultBytes);
-	}
+    public long getLastCheckpointedOffset() {
+        return lastCheckpointedOffset;
+    }
 
-	public String getVersion() {
-		return version;
-	}
+    // TODO the following two methods might be not so efficient
+    //  optimize them with MemorySegment if needed
 
-	public long getLastCheckpointedOffset() {
-		return lastCheckpointedOffset;
-	}
+    public <T> List<T> getResults(TypeSerializer<T> elementSerializer) throws IOException {
+        List<T> results = new ArrayList<>();
+        for (byte[] serializedResult : serializedResults) {
+            ByteArrayInputStream bais = new ByteArrayInputStream(serializedResult);
+            DataInputViewStreamWrapper wrapper = new DataInputViewStreamWrapper(bais);
+            results.add(elementSerializer.deserialize(wrapper));
+        }
+        return results;
+    }
 
-	// TODO the following two methods might be not so efficient
-	//  optimize them with MemorySegment if needed
-
-	public List<T> getResults(TypeSerializer<T> elementSerializer) throws IOException {
-		ListSerializer<T> listSerializer = new ListSerializer<>(elementSerializer);
-		ByteArrayInputStream bais = new ByteArrayInputStream(resultBytes);
-		DataInputViewStreamWrapper wrapper = new DataInputViewStreamWrapper(bais);
-		return listSerializer.deserialize(wrapper);
-	}
-
-	public void serialize(DataOutputView outView) throws IOException {
-		versionSerializer.serialize(version, outView);
-		offsetSerializer.serialize(lastCheckpointedOffset, outView);
-
-		outView.writeInt(resultBytes.length);
-		outView.write(resultBytes);
-	}
+    public void serialize(DataOutputView outView) throws IOException {
+        versionSerializer.serialize(version, outView);
+        offsetSerializer.serialize(lastCheckpointedOffset, outView);
+        bufferSerializer.serialize(serializedResults, outView);
+    }
 }

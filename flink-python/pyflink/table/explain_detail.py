@@ -22,6 +22,8 @@ __all__ = ['ExplainDetail']
 class ExplainDetail(object):
     """
     ExplainDetail defines the types of details for explain result.
+
+    .. versionadded:: 1.11.0
     """
 
     # The cost information on physical rel node estimated by optimizer.
@@ -32,3 +34,6 @@ class ExplainDetail(object):
     # The changelog mode produced by a physical rel node.
     # e.g. GroupAggregate(..., changelogMode=[I,UA,D])
     CHANGELOG_MODE = 1
+
+    # The execution plan in json format of the program.
+    JSON_EXECUTION_PLAN = 2

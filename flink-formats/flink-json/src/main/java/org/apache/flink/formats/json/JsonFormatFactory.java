@@ -18,17 +18,18 @@
 
 package org.apache.flink.formats.json;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.formats.common.TimestampFormat;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.format.ScanFormat;
-import org.apache.flink.table.connector.format.SinkFormat;
+import org.apache.flink.table.connector.format.DecodingFormat;
+import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DeserializationFormatFactory;
 import org.apache.flink.table.factories.DynamicTableFactory;
@@ -41,104 +42,107 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.apache.flink.formats.json.JsonOptions.FAIL_ON_MISSING_FIELD;
-import static org.apache.flink.formats.json.JsonOptions.IGNORE_PARSE_ERRORS;
+import static org.apache.flink.formats.json.JsonFormatOptions.ENCODE_DECIMAL_AS_PLAIN_NUMBER;
+import static org.apache.flink.formats.json.JsonFormatOptions.FAIL_ON_MISSING_FIELD;
+import static org.apache.flink.formats.json.JsonFormatOptions.IGNORE_PARSE_ERRORS;
+import static org.apache.flink.formats.json.JsonFormatOptions.MAP_NULL_KEY_LITERAL;
+import static org.apache.flink.formats.json.JsonFormatOptions.MAP_NULL_KEY_MODE;
+import static org.apache.flink.formats.json.JsonFormatOptions.TIMESTAMP_FORMAT;
 
 /**
- * Table format factory for providing configured instances of JSON to RowData
- * {@link SerializationSchema} and {@link DeserializationSchema}.
+ * Table format factory for providing configured instances of JSON to RowData {@link
+ * SerializationSchema} and {@link DeserializationSchema}.
  */
-public class JsonFormatFactory implements
-		DeserializationFormatFactory,
-		SerializationFormatFactory {
+@Internal
+public class JsonFormatFactory implements DeserializationFormatFactory, SerializationFormatFactory {
 
-	public static final String IDENTIFIER = "json";
+    public static final String IDENTIFIER = "json";
 
-	@SuppressWarnings("unchecked")
-	@Override
-	public ScanFormat<DeserializationSchema<RowData>> createScanFormat(
-			DynamicTableFactory.Context context,
-			ReadableConfig formatOptions) {
-		FactoryUtil.validateFactoryOptions(this, formatOptions);
-		validateFormatOptions(formatOptions);
+    @Override
+    public DecodingFormat<DeserializationSchema<RowData>> createDecodingFormat(
+            DynamicTableFactory.Context context, ReadableConfig formatOptions) {
+        FactoryUtil.validateFactoryOptions(this, formatOptions);
+        JsonFormatOptionsUtil.validateDecodingFormatOptions(formatOptions);
 
-		final boolean failOnMissingField = formatOptions.get(FAIL_ON_MISSING_FIELD);
-		final boolean ignoreParseErrors = formatOptions.get(IGNORE_PARSE_ERRORS);
+        final boolean failOnMissingField = formatOptions.get(FAIL_ON_MISSING_FIELD);
+        final boolean ignoreParseErrors = formatOptions.get(IGNORE_PARSE_ERRORS);
+        TimestampFormat timestampOption = JsonFormatOptionsUtil.getTimestampFormat(formatOptions);
 
-		return new ScanFormat<DeserializationSchema<RowData>>() {
-			@Override
-			public DeserializationSchema<RowData> createScanFormat(
-					ScanTableSource.Context scanContext,
-					DataType producedDataType) {
-				final RowType rowType = (RowType) producedDataType.getLogicalType();
-				final TypeInformation<RowData> rowDataTypeInfo =
-						(TypeInformation<RowData>) scanContext.createTypeInformation(producedDataType);
-				return new JsonRowDataDeserializationSchema(
-						rowType,
-						rowDataTypeInfo,
-						failOnMissingField,
-						ignoreParseErrors);
-			}
+        return new DecodingFormat<DeserializationSchema<RowData>>() {
+            @Override
+            public DeserializationSchema<RowData> createRuntimeDecoder(
+                    DynamicTableSource.Context context, DataType producedDataType) {
+                final RowType rowType = (RowType) producedDataType.getLogicalType();
+                final TypeInformation<RowData> rowDataTypeInfo =
+                        context.createTypeInformation(producedDataType);
+                return new JsonRowDataDeserializationSchema(
+                        rowType,
+                        rowDataTypeInfo,
+                        failOnMissingField,
+                        ignoreParseErrors,
+                        timestampOption);
+            }
 
-			@Override
-			public ChangelogMode getChangelogMode() {
-				return ChangelogMode.insertOnly();
-			}
-		};
-	}
+            @Override
+            public ChangelogMode getChangelogMode() {
+                return ChangelogMode.insertOnly();
+            }
+        };
+    }
 
-	@Override
-	public SinkFormat<SerializationSchema<RowData>> createSinkFormat(
-			DynamicTableFactory.Context context,
-			ReadableConfig formatOptions) {
-		FactoryUtil.validateFactoryOptions(this, formatOptions);
+    @Override
+    public EncodingFormat<SerializationSchema<RowData>> createEncodingFormat(
+            DynamicTableFactory.Context context, ReadableConfig formatOptions) {
+        FactoryUtil.validateFactoryOptions(this, formatOptions);
+        JsonFormatOptionsUtil.validateEncodingFormatOptions(formatOptions);
 
-		return new SinkFormat<SerializationSchema<RowData>>() {
-			@Override
-			public SerializationSchema<RowData> createSinkFormat(
-					DynamicTableSink.Context context,
-					DataType consumedDataType) {
-				final RowType rowType = (RowType) consumedDataType.getLogicalType();
-				return new JsonRowDataSerializationSchema(rowType);
-			}
+        TimestampFormat timestampOption = JsonFormatOptionsUtil.getTimestampFormat(formatOptions);
+        JsonFormatOptions.MapNullKeyMode mapNullKeyMode =
+                JsonFormatOptionsUtil.getMapNullKeyMode(formatOptions);
+        String mapNullKeyLiteral = formatOptions.get(MAP_NULL_KEY_LITERAL);
 
-			@Override
-			public ChangelogMode getChangelogMode() {
-				return ChangelogMode.insertOnly();
-			}
-		};
-	}
+        final boolean encodeDecimalAsPlainNumber =
+                formatOptions.get(ENCODE_DECIMAL_AS_PLAIN_NUMBER);
 
-	@Override
-	public String factoryIdentifier() {
-		return IDENTIFIER;
-	}
+        return new EncodingFormat<SerializationSchema<RowData>>() {
+            @Override
+            public SerializationSchema<RowData> createRuntimeEncoder(
+                    DynamicTableSink.Context context, DataType consumedDataType) {
+                final RowType rowType = (RowType) consumedDataType.getLogicalType();
+                return new JsonRowDataSerializationSchema(
+                        rowType,
+                        timestampOption,
+                        mapNullKeyMode,
+                        mapNullKeyLiteral,
+                        encodeDecimalAsPlainNumber);
+            }
 
-	@Override
-	public Set<ConfigOption<?>> requiredOptions() {
-		return Collections.emptySet();
-	}
+            @Override
+            public ChangelogMode getChangelogMode() {
+                return ChangelogMode.insertOnly();
+            }
+        };
+    }
 
-	@Override
-	public Set<ConfigOption<?>> optionalOptions() {
-		Set<ConfigOption<?>> options = new HashSet<>();
-		options.add(FAIL_ON_MISSING_FIELD);
-		options.add(IGNORE_PARSE_ERRORS);
-		return options;
-	}
+    @Override
+    public String factoryIdentifier() {
+        return IDENTIFIER;
+    }
 
-	// ------------------------------------------------------------------------
-	//  Validation
-	// ------------------------------------------------------------------------
+    @Override
+    public Set<ConfigOption<?>> requiredOptions() {
+        return Collections.emptySet();
+    }
 
-	static void validateFormatOptions(ReadableConfig tableOptions) {
-		boolean failOnMissingField = tableOptions.get(FAIL_ON_MISSING_FIELD);
-		boolean ignoreParseErrors = tableOptions.get(IGNORE_PARSE_ERRORS);
-		if (ignoreParseErrors && failOnMissingField) {
-			throw new ValidationException(FAIL_ON_MISSING_FIELD.key()
-					+ " and "
-					+ IGNORE_PARSE_ERRORS.key()
-					+ " shouldn't both be true.");
-		}
-	}
+    @Override
+    public Set<ConfigOption<?>> optionalOptions() {
+        Set<ConfigOption<?>> options = new HashSet<>();
+        options.add(FAIL_ON_MISSING_FIELD);
+        options.add(IGNORE_PARSE_ERRORS);
+        options.add(TIMESTAMP_FORMAT);
+        options.add(MAP_NULL_KEY_MODE);
+        options.add(MAP_NULL_KEY_LITERAL);
+        options.add(ENCODE_DECIMAL_AS_PLAIN_NUMBER);
+        return options;
+    }
 }
