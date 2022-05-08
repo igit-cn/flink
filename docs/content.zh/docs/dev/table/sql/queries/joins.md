@@ -3,7 +3,7 @@ title: "Join"
 weight: 10
 type: docs
 aliases:
-  - /dev/table/streaming/joins.html
+  - /zh/dev/table/streaming/joins.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -109,7 +109,7 @@ Since time attributes are quasi-monotonic increasing, Flink can remove old value
 Temporal Joins
 --------------
 
-A Temporal table is a table that evolves over time - otherwise known in Flink as a [dynamic table]({% link dev/table/streaming/dynamic_tables.md %}). Rows in a temporal table are associated with one or more temporal periods and all Flink tables are temporal(dynamic).
+A Temporal table is a table that evolves over time - otherwise known in Flink as a [dynamic table]({{< ref "docs/dev/table/concepts/dynamic_tables" >}}). Rows in a temporal table are associated with one or more temporal periods and all Flink tables are temporal(dynamic).
 The temporal table contains one or more versioned table snapshots, it can be a changing history table which tracks the changes(e.g. database changelog, contains all snapshots) or a changing dimensioned table which materializes the changes(e.g. database table which contains the latest snapshot). 
 
 ### Event Time Temporal Join
@@ -167,7 +167,7 @@ SELECT
      price,
      currency,
      conversion_rate,
-     order_time,
+     order_time
 FROM orders
 LEFT JOIN currency_rates FOR SYSTEM_TIME AS OF orders.order_time
 ON orders.currency = currency_rates.currency;

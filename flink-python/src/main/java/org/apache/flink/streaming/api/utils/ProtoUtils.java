@@ -28,7 +28,9 @@ import org.apache.flink.streaming.api.functions.python.DataStreamPythonFunctionI
 import org.apache.flink.table.functions.python.PythonAggregateFunctionInfo;
 import org.apache.flink.table.functions.python.PythonFunctionInfo;
 import org.apache.flink.table.functions.python.PythonFunctionKind;
-import org.apache.flink.table.planner.typeutils.DataViewUtils;
+import org.apache.flink.table.runtime.dataview.DataViewSpec;
+import org.apache.flink.table.runtime.dataview.ListViewSpec;
+import org.apache.flink.table.runtime.dataview.MapViewSpec;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -74,8 +76,7 @@ public enum ProtoUtils {
     }
 
     public static FlinkFnApi.UserDefinedAggregateFunction getUserDefinedAggregateFunctionProto(
-            PythonAggregateFunctionInfo pythonFunctionInfo,
-            DataViewUtils.DataViewSpec[] dataViewSpecs) {
+            PythonAggregateFunctionInfo pythonFunctionInfo, DataViewSpec[] dataViewSpecs) {
         FlinkFnApi.UserDefinedAggregateFunction.Builder builder =
                 FlinkFnApi.UserDefinedAggregateFunction.newBuilder();
         builder.setPayload(
@@ -94,12 +95,12 @@ public enum ProtoUtils {
             builder.addInputs(inputProto);
         }
         if (dataViewSpecs != null) {
-            for (DataViewUtils.DataViewSpec spec : dataViewSpecs) {
+            for (DataViewSpec spec : dataViewSpecs) {
                 FlinkFnApi.UserDefinedAggregateFunction.DataViewSpec.Builder specBuilder =
                         FlinkFnApi.UserDefinedAggregateFunction.DataViewSpec.newBuilder();
                 specBuilder.setName(spec.getStateId());
-                if (spec instanceof DataViewUtils.ListViewSpec) {
-                    DataViewUtils.ListViewSpec listViewSpec = (DataViewUtils.ListViewSpec) spec;
+                if (spec instanceof ListViewSpec) {
+                    ListViewSpec listViewSpec = (ListViewSpec) spec;
                     specBuilder.setListView(
                             FlinkFnApi.UserDefinedAggregateFunction.DataViewSpec.ListView
                                     .newBuilder()
@@ -109,7 +110,7 @@ public enum ProtoUtils {
                                                             .getElementDataType()
                                                             .getLogicalType())));
                 } else {
-                    DataViewUtils.MapViewSpec mapViewSpec = (DataViewUtils.MapViewSpec) spec;
+                    MapViewSpec mapViewSpec = (MapViewSpec) spec;
                     FlinkFnApi.UserDefinedAggregateFunction.DataViewSpec.MapView.Builder
                             mapViewBuilder =
                                     FlinkFnApi.UserDefinedAggregateFunction.DataViewSpec.MapView
@@ -131,7 +132,13 @@ public enum ProtoUtils {
             DataStreamPythonFunctionInfo dataStreamPythonFunctionInfo,
             RuntimeContext runtimeContext,
             Map<String, String> internalParameters,
-            boolean inBatchExecutionMode) {
+            boolean inBatchExecutionMode,
+            boolean isMetricEnabled,
+            boolean isProfileEnabled,
+            boolean hasSideOutput,
+            int stateCacheSize,
+            int mapStateReadCacheSize,
+            int mapStateWriteCacheSize) {
         FlinkFnApi.UserDefinedDataStreamFunction.Builder builder =
                 FlinkFnApi.UserDefinedDataStreamFunction.newBuilder();
         builder.setFunctionType(
@@ -174,7 +181,12 @@ public enum ProtoUtils {
                         dataStreamPythonFunctionInfo
                                 .getPythonFunction()
                                 .getSerializedPythonFunction()));
-        builder.setMetricEnabled(true);
+        builder.setMetricEnabled(isMetricEnabled);
+        builder.setProfileEnabled(isProfileEnabled);
+        builder.setHasSideOutput(hasSideOutput);
+        builder.setStateCacheSize(stateCacheSize);
+        builder.setMapStateReadCacheSize(mapStateReadCacheSize);
+        builder.setMapStateWriteCacheSize(mapStateWriteCacheSize);
         return builder.build();
     }
 
@@ -191,7 +203,13 @@ public enum ProtoUtils {
                     DataStreamPythonFunctionInfo dataStreamPythonFunctionInfo,
                     RuntimeContext runtimeContext,
                     Map<String, String> internalParameters,
-                    boolean inBatchExecutionMode) {
+                    boolean inBatchExecutionMode,
+                    boolean isMetricEnabled,
+                    boolean isProfileEnabled,
+                    boolean hasSideOutput,
+                    int stateCacheSize,
+                    int mapStateReadCacheSize,
+                    int mapStateWriteCacheSize) {
         List<FlinkFnApi.UserDefinedDataStreamFunction> results = new ArrayList<>();
 
         Object[] inputs = dataStreamPythonFunctionInfo.getInputs();
@@ -202,7 +220,13 @@ public enum ProtoUtils {
                             (DataStreamPythonFunctionInfo) inputs[0],
                             runtimeContext,
                             internalParameters,
-                            inBatchExecutionMode));
+                            inBatchExecutionMode,
+                            isMetricEnabled,
+                            isProfileEnabled,
+                            false,
+                            stateCacheSize,
+                            mapStateReadCacheSize,
+                            mapStateWriteCacheSize));
         }
 
         results.add(
@@ -210,7 +234,13 @@ public enum ProtoUtils {
                         dataStreamPythonFunctionInfo,
                         runtimeContext,
                         internalParameters,
-                        inBatchExecutionMode));
+                        inBatchExecutionMode,
+                        isMetricEnabled,
+                        isProfileEnabled,
+                        hasSideOutput,
+                        stateCacheSize,
+                        mapStateReadCacheSize,
+                        mapStateWriteCacheSize));
         return results;
     }
 
@@ -220,13 +250,25 @@ public enum ProtoUtils {
                     RuntimeContext runtimeContext,
                     Map<String, String> internalParameters,
                     TypeInformation<?> keyTypeInfo,
-                    boolean inBatchExecutionMode) {
+                    boolean inBatchExecutionMode,
+                    boolean isMetricEnabled,
+                    boolean isProfileEnabled,
+                    boolean hasSideOutput,
+                    int stateCacheSize,
+                    int mapStateReadCacheSize,
+                    int mapStateWriteCacheSize) {
         List<FlinkFnApi.UserDefinedDataStreamFunction> results =
                 createUserDefinedDataStreamFunctionProtos(
                         dataStreamPythonFunctionInfo,
                         runtimeContext,
                         internalParameters,
-                        inBatchExecutionMode);
+                        inBatchExecutionMode,
+                        isMetricEnabled,
+                        isProfileEnabled,
+                        hasSideOutput,
+                        stateCacheSize,
+                        mapStateReadCacheSize,
+                        mapStateWriteCacheSize);
 
         // set the key typeinfo for the head operator
         FlinkFnApi.TypeInfo builtKeyTypeInfo =

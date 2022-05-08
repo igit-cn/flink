@@ -23,6 +23,7 @@ import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.CheckpointType;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
 import org.apache.flink.runtime.checkpoint.channel.InputChannelInfo;
 import org.apache.flink.runtime.execution.CancelTaskException;
@@ -56,12 +57,15 @@ import org.apache.flink.runtime.operators.testutils.ExpectedTestException;
 import org.apache.flink.runtime.taskexecutor.PartitionProducerStateChecker;
 import org.apache.flink.runtime.taskmanager.Task;
 import org.apache.flink.runtime.taskmanager.TestTaskBuilder;
+import org.apache.flink.testutils.TestingUtils;
+import org.apache.flink.testutils.executor.TestExecutorResource;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
 
 import org.junit.Assert;
+import org.junit.ClassRule;
 import org.junit.Test;
 
 import javax.annotation.Nullable;
@@ -79,6 +83,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -115,11 +120,15 @@ import static org.mockito.Mockito.when;
 
 /** Tests for the {@link RemoteInputChannel}. */
 public class RemoteInputChannelTest {
+    @ClassRule
+    public static final TestExecutorResource<ScheduledExecutorService> EXECUTOR_RESOURCE =
+            TestingUtils.defaultExecutorResource();
 
     private static final long CHECKPOINT_ID = 1L;
-    private static final CheckpointOptions UNALIGNED = CheckpointOptions.unaligned(getDefault());
+    private static final CheckpointOptions UNALIGNED =
+            CheckpointOptions.unaligned(CheckpointType.CHECKPOINT, getDefault());
     private static final CheckpointOptions ALIGNED_WITH_TIMEOUT =
-            alignedWithTimeout(getDefault(), 10);
+            alignedWithTimeout(CheckpointType.CHECKPOINT, getDefault(), 10);
 
     @Test
     public void testGateNotifiedOnBarrierConversion() throws IOException, InterruptedException {
@@ -137,12 +146,17 @@ public class RemoteInputChannelTest {
                                     new TestVerifyConnectionManager(
                                             new TestVerifyPartitionRequestClient()))
                             .buildRemoteChannel(inputGate);
-            channel.requestSubpartition(0);
+            channel.requestSubpartition();
 
             channel.onBuffer(
                     toBuffer(
                             new CheckpointBarrier(
-                                    1L, 123L, alignedWithTimeout(getDefault(), Integer.MAX_VALUE)),
+                                    1L,
+                                    123L,
+                                    alignedWithTimeout(
+                                            CheckpointType.CHECKPOINT,
+                                            getDefault(),
+                                            Integer.MAX_VALUE)),
                             false),
                     sequenceNumber,
                     0);
@@ -207,7 +221,9 @@ public class RemoteInputChannelTest {
 
         inputChannel.checkpointStarted(
                 new CheckpointBarrier(
-                        42, System.currentTimeMillis(), CheckpointOptions.unaligned(getDefault())));
+                        42,
+                        System.currentTimeMillis(),
+                        CheckpointOptions.unaligned(CheckpointType.CHECKPOINT, getDefault())));
 
         final Buffer buffer = createBuffer(TestBufferFactory.BUFFER_SIZE);
 
@@ -333,9 +349,9 @@ public class RemoteInputChannelTest {
     public void testRetriggerWithoutPartitionRequest() throws Exception {
         SingleInputGate inputGate = createSingleInputGate(1);
 
-        RemoteInputChannel ch = createRemoteInputChannel(inputGate, 500, 3000);
+        RemoteInputChannel ch = createRemoteInputChannel(inputGate, 0, 500, 3000);
 
-        ch.retriggerSubpartitionRequest(0);
+        ch.retriggerSubpartitionRequest();
     }
 
     @Test
@@ -352,19 +368,19 @@ public class RemoteInputChannelTest {
                 createRemoteInputChannel(inputGate, connectionManager, partitionId, 500, 3000);
 
         // Initial request
-        ch.requestSubpartition(0);
+        ch.requestSubpartition();
         client.verifyResult(partitionId, 0, 0);
 
         // Request subpartition and verify that the actual requests are delayed.
         for (int expected : expectedDelays) {
-            ch.retriggerSubpartitionRequest(0);
+            ch.retriggerSubpartitionRequest();
 
             client.verifyResult(partitionId, 0, expected);
         }
 
         // Exception after backoff is greater than the maximum backoff.
         try {
-            ch.retriggerSubpartitionRequest(0);
+            ch.retriggerSubpartitionRequest();
             ch.getNextBuffer();
             fail("Did not throw expected exception.");
         } catch (Exception expected) {
@@ -382,16 +398,16 @@ public class RemoteInputChannelTest {
                 createRemoteInputChannel(inputGate, connectionManager, partitionId, 500, 500);
 
         // No delay for first request
-        ch.requestSubpartition(0);
+        ch.requestSubpartition();
         client.verifyResult(partitionId, 0, 0);
 
         // Initial delay for second request
-        ch.retriggerSubpartitionRequest(0);
+        ch.retriggerSubpartitionRequest();
         client.verifyResult(partitionId, 0, 500);
 
         // Exception after backoff is greater than the maximum backoff.
         try {
-            ch.retriggerSubpartitionRequest(0);
+            ch.retriggerSubpartitionRequest();
             ch.getNextBuffer();
             fail("Did not throw expected exception.");
         } catch (Exception expected) {
@@ -409,12 +425,12 @@ public class RemoteInputChannelTest {
                 createRemoteInputChannel(inputGate, connectionManager, partitionId, 0, 0);
 
         // No delay for first request
-        ch.requestSubpartition(0);
+        ch.requestSubpartition();
         client.verifyResult(partitionId, 0, 0);
 
         // Exception, because backoff is disabled.
         try {
-            ch.retriggerSubpartitionRequest(0);
+            ch.retriggerSubpartitionRequest();
             ch.getNextBuffer();
             fail("Did not throw expected exception.");
         } catch (Exception expected) {
@@ -451,7 +467,7 @@ public class RemoteInputChannelTest {
 
         ch.onError(new ProducerFailedException(new RuntimeException("Expected test exception.")));
 
-        ch.requestSubpartition(0);
+        ch.requestSubpartition();
 
         // Should throw an instance of CancelTaskException.
         ch.getNextBuffer();
@@ -495,7 +511,7 @@ public class RemoteInputChannelTest {
                     spy(networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers));
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             // Prepare the exclusive and floating buffers to verify recycle logic later
             final Buffer exclusiveBuffer = inputChannel.requestBuffer();
@@ -683,7 +699,7 @@ public class RemoteInputChannelTest {
                     spy(networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers));
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             // Prepare the exclusive and floating buffers to verify recycle logic later
             final Buffer exclusiveBuffer = inputChannel.requestBuffer();
@@ -779,7 +795,7 @@ public class RemoteInputChannelTest {
                     spy(networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers));
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             // Prepare the exclusive and floating buffers to verify recycle logic later
             final Buffer exclusiveBuffer = inputChannel.requestBuffer();
@@ -902,7 +918,7 @@ public class RemoteInputChannelTest {
             inputGate.setupChannels();
             inputGate.requestPartitions();
             for (RemoteInputChannel inputChannel : inputChannels) {
-                inputChannel.requestSubpartition(0);
+                inputChannel.requestSubpartition();
             }
 
             // Exhaust all the floating buffers
@@ -963,7 +979,7 @@ public class RemoteInputChannelTest {
 
         final SingleInputGate inputGate = createSingleInputGate(1);
         final RemoteInputChannel successfulRemoteIC = createRemoteInputChannel(inputGate);
-        successfulRemoteIC.requestSubpartition(0);
+        successfulRemoteIC.requestSubpartition();
 
         // late creation -> no exclusive buffers, also no requested subpartition in
         // successfulRemoteIC
@@ -1032,7 +1048,7 @@ public class RemoteInputChannelTest {
                     networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers);
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             final Callable<Void> requestBufferTask =
                     new Callable<Void>() {
@@ -1104,7 +1120,7 @@ public class RemoteInputChannelTest {
                     networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers);
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             final Callable<Void> requestBufferTask =
                     new Callable<Void>() {
@@ -1168,7 +1184,7 @@ public class RemoteInputChannelTest {
                     networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers);
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             final Callable<Void> releaseTask =
                     new Callable<Void>() {
@@ -1235,7 +1251,7 @@ public class RemoteInputChannelTest {
                     networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers);
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             final Callable<Void> bufferPoolInteractionsTask =
                     () -> {
@@ -1317,7 +1333,7 @@ public class RemoteInputChannelTest {
                     networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers);
             inputGate.setBufferPool(bufferPool);
             inputGate.setupChannels();
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
 
             for (int i = 0; i < numTotalBuffers; i++) {
                 Buffer buffer = inputChannel.requestBuffer();
@@ -1358,8 +1374,8 @@ public class RemoteInputChannelTest {
     }
 
     /**
-     * Tests that {@link RemoteInputChannel#retriggerSubpartitionRequest(int)} would throw the
-     * {@link PartitionNotFoundException} if backoff is 0.
+     * Tests that {@link RemoteInputChannel#retriggerSubpartitionRequest()} would throw the {@link
+     * PartitionNotFoundException} if backoff is 0.
      */
     @Test
     public void testPartitionNotFoundExceptionWhileRetriggeringRequest() throws Exception {
@@ -1369,9 +1385,9 @@ public class RemoteInputChannelTest {
 
         // Request partition to initialize client to avoid illegal state after retriggering
         // partition
-        inputChannel.requestSubpartition(0);
+        inputChannel.requestSubpartition();
         // The default backoff is 0 then it would set PartitionNotFoundException on this channel
-        inputChannel.retriggerSubpartitionRequest(0);
+        inputChannel.retriggerSubpartitionRequest();
         try {
             inputChannel.checkError();
 
@@ -1384,7 +1400,7 @@ public class RemoteInputChannelTest {
     /**
      * Tests that any exceptions thrown by {@link
      * ConnectionManager#createPartitionRequestClient(ConnectionID)} would be wrapped into {@link
-     * PartitionConnectionException} during {@link RemoteInputChannel#requestSubpartition(int)}.
+     * PartitionConnectionException} during {@link RemoteInputChannel#requestSubpartition()}.
      */
     @Test
     public void testPartitionConnectionExceptionWhileRequestingPartition() throws Exception {
@@ -1392,7 +1408,7 @@ public class RemoteInputChannelTest {
                 InputChannelTestUtils.createRemoteInputChannel(
                         createSingleInputGate(1), 0, new TestingExceptionConnectionManager());
         try {
-            inputChannel.requestSubpartition(0);
+            inputChannel.requestSubpartition();
             fail("Expected PartitionConnectionException.");
         } catch (PartitionConnectionException ex) {
             assertThat(inputChannel.getPartitionId(), is(ex.getPartitionId()));
@@ -1408,16 +1424,25 @@ public class RemoteInputChannelTest {
         remoteChannel.resumeConsumption();
     }
 
+    @Test(expected = IllegalStateException.class)
+    public void testReleasedChannelAnnounceBufferSize() throws Exception {
+        SingleInputGate inputGate = createSingleInputGate(1);
+        RemoteInputChannel remoteChannel = createRemoteInputChannel(inputGate);
+
+        remoteChannel.releaseAllResources();
+        remoteChannel.announceBufferSize(10);
+    }
+
     @Test
     public void testOnUpstreamBlockedAndResumed() throws Exception {
         BufferPool bufferPool = new TestBufferPool();
         SingleInputGate inputGate = createSingleInputGate(bufferPool);
 
-        RemoteInputChannel remoteChannel1 = createRemoteInputChannel(inputGate, 2);
-        RemoteInputChannel remoteChannel2 = createRemoteInputChannel(inputGate, 0);
+        RemoteInputChannel remoteChannel1 = createRemoteInputChannel(inputGate, 0, 2);
+        RemoteInputChannel remoteChannel2 = createRemoteInputChannel(inputGate, 1, 0);
         inputGate.setup();
-        remoteChannel1.requestSubpartition(0);
-        remoteChannel2.requestSubpartition(1);
+        remoteChannel1.requestSubpartition();
+        remoteChannel2.requestSubpartition();
 
         remoteChannel1.onSenderBacklog(2);
         remoteChannel2.onSenderBacklog(2);
@@ -1428,7 +1453,12 @@ public class RemoteInputChannelTest {
         Buffer barrier =
                 EventSerializer.toBuffer(
                         new CheckpointBarrier(
-                                1L, 123L, alignedWithTimeout(getDefault(), Integer.MAX_VALUE)),
+                                1L,
+                                123L,
+                                alignedWithTimeout(
+                                        CheckpointType.CHECKPOINT,
+                                        getDefault(),
+                                        Integer.MAX_VALUE)),
                         false);
         remoteChannel1.onBuffer(barrier, 0, 0);
         remoteChannel2.onBuffer(barrier, 0, 0);
@@ -1457,11 +1487,11 @@ public class RemoteInputChannelTest {
         BufferPool bufferPool = new TestBufferPool();
         SingleInputGate inputGate = createSingleInputGate(bufferPool);
 
-        RemoteInputChannel remoteChannel1 = createRemoteInputChannel(inputGate, 2);
-        RemoteInputChannel remoteChannel2 = createRemoteInputChannel(inputGate, 0);
+        RemoteInputChannel remoteChannel1 = createRemoteInputChannel(inputGate, 0, 2);
+        RemoteInputChannel remoteChannel2 = createRemoteInputChannel(inputGate, 1, 0);
         inputGate.setup();
-        remoteChannel1.requestSubpartition(0);
-        remoteChannel2.requestSubpartition(1);
+        remoteChannel1.requestSubpartition();
+        remoteChannel2.requestSubpartition();
 
         remoteChannel1.onSenderBacklog(2);
         remoteChannel2.onSenderBacklog(2);
@@ -1624,6 +1654,38 @@ public class RemoteInputChannelTest {
         assertInflightBufferSizes(channel, 2);
     }
 
+    @Test
+    public void testSizeOfQueuedBuffers() throws Exception {
+        int sequenceNumber = 0;
+        int bufferSize = 1;
+        int queueSize = 0;
+        final RemoteInputChannel channel = buildInputGateAndGetChannel(sequenceNumber);
+        assertEquals(0, channel.unsynchronizedGetSizeOfQueuedBuffers());
+
+        // Receive a couple of buffers.
+        for (int i = 0; i < 2; i++) {
+            queueSize += bufferSize;
+            sendBuffer(channel, sequenceNumber++, bufferSize++);
+            assertEquals(queueSize, channel.unsynchronizedGetSizeOfQueuedBuffers());
+        }
+
+        // Receive the event.
+        queueSize +=
+                EventSerializer.toSerializedEvent(new CheckpointBarrier(1L, 123L, UNALIGNED))
+                        .remaining();
+        sendBarrier(channel, sequenceNumber++, UNALIGNED);
+        assertEquals(queueSize, channel.unsynchronizedGetSizeOfQueuedBuffers());
+
+        // Poll all received buffers.
+        for (int i = 0; i < 3; i++) {
+            Optional<BufferAndAvailability> nextBuffer = channel.getNextBuffer();
+            queueSize -= nextBuffer.get().buffer().getSize();
+            assertEquals(queueSize, channel.unsynchronizedGetSizeOfQueuedBuffers());
+        }
+
+        assertEquals(0, channel.unsynchronizedGetSizeOfQueuedBuffers());
+    }
+
     private void sendBarrier(
             RemoteInputChannel channel, int sequenceNumber, CheckpointOptions checkpointOptions)
             throws IOException {
@@ -1667,19 +1729,24 @@ public class RemoteInputChannelTest {
     // ---------------------------------------------------------------------------------------------
 
     private RemoteInputChannel createRemoteInputChannel(SingleInputGate inputGate) {
-        return createRemoteInputChannel(inputGate, 0, 0);
+        return createRemoteInputChannel(inputGate, 0, 0, 0);
     }
 
     private RemoteInputChannel createRemoteInputChannel(
-            SingleInputGate inputGate, int initialCredits) {
+            SingleInputGate inputGate, int consumedSubpartitionIndex, int initialCredits) {
         return InputChannelBuilder.newBuilder()
+                .setConsumedSubpartitionIndex(consumedSubpartitionIndex)
                 .setNetworkBuffersPerChannel(initialCredits)
                 .buildRemoteChannel(inputGate);
     }
 
     private RemoteInputChannel createRemoteInputChannel(
-            SingleInputGate inputGate, int initialBackoff, int maxBackoff) {
+            SingleInputGate inputGate,
+            int consumedSubpartitionIndex,
+            int initialBackoff,
+            int maxBackoff) {
         return InputChannelBuilder.newBuilder()
+                .setConsumedSubpartitionIndex(consumedSubpartitionIndex)
                 .setInitialBackoff(initialBackoff)
                 .setMaxBackoff(maxBackoff)
                 .buildRemoteChannel(inputGate);
@@ -1737,7 +1804,7 @@ public class RemoteInputChannelTest {
         final Task task =
                 new TestTaskBuilder(shuffleEnvironment)
                         .setPartitionProducerStateChecker(partitionProducerStateChecker)
-                        .build();
+                        .build(EXECUTOR_RESOURCE.getExecutor());
         final SingleInputGate inputGate =
                 new SingleInputGateBuilder().setPartitionProducerStateProvider(task).build();
 

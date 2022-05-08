@@ -28,6 +28,13 @@ planning to upgrade your Flink version to 1.14.
 
 ### Known issues
 
+#### State migration issues
+
+Some of our internal serializers i.e. RowSerializer, TwoPhaseCommitSinkFunction's serializer,
+LinkedListSerializer might prevent a successful job starts if state migration is necessary.
+The fix is tracked by [FLINK-24858](https://issues.apache.org/jira/browse/FLINK-24858). We recommend
+to immediately upgrade to 1.14.3 when migrating from 1.13.x.
+
 #### Memory leak with Pulsar connector on Java 11
 
 Netty, which the Pulsar client uses underneath, allocates memory differently on Java 11 and Java 8. On Java
@@ -200,6 +207,19 @@ the sink needs a user-configured and unique transaction prefix, such that transa
 applications do not interfere with each other.
 
 ### DataStream API
+
+#### Fixed idleness handling for two/multi input operators
+
+##### [FLINK-18934](https://issues.apache.org/jira/browse/FLINK-18934)
+
+##### [FLINK-23767](https://issues.apache.org/jira/browse/FLINK-23767)
+
+We added `processWatermarkStatusX` method to classes such as `AbstractStreamOperator`, `Input` etc.
+It allows to take the `WatermarkStatus` into account when combining watermarks in two/multi input
+operators.
+
+Note that with this release, we renamed the previously internal `StreamStatus` to `WatermarkStatus`
+in order to better reflect its purpose.
 
 #### Allow @TypeInfo annotation on POJO field declarations
 

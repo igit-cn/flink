@@ -35,11 +35,9 @@ under the License.
 
 首先需要准备源码。可以[从发布版本下载源码]({{< downloads >}}) 或者[从 Git 库克隆 Flink 源码]({{< github_repo >}})。
 
-还需要准备 **Maven 3** 和 **JDK** (Java开发套件)。Flink 依赖 **Java 8** 或更新的版本来进行构建。
+还需要准备 **Maven 3** 和 **JDK** (Java开发套件)。Flink 依赖 **Java 11** 或更新的版本来进行构建。
 
 *注意：Maven 3.3.x 可以构建 Flink，但是不能正确地屏蔽掉指定的依赖。Maven 3.2.5 可以正确地构建库文件。
-
-运行单元测试需要 Java 8u51 以上的版本，以避免使用 PowerMock Runner 的单元测试失败。
 
 输入以下命令从 Git 克隆代码
 
@@ -55,11 +53,17 @@ mvn clean install -DskipTests
 
 上面的 [Maven](http://maven.apache.org) 指令（`mvn`）首先删除（`clean`）所有存在的构建，然后构建一个新的 Flink 运行包（`install`）。
 
-为了加速构建，可以执行如下命令，以跳过测试，QA 的插件和 JavaDocs 的生成：
+为了加速构建，可以：
+- 使用 ' -DskipTests' 跳过测试
+- 使用 `fast` Maven profile 跳过 QA 的插件和 JavaDocs 的生成
+- 使用 `skip-webui-build` Maven profile 跳过 WebUI 编译
+- 使用 Maven 并行构建功能，比如 'mvn package -T 1C' 会尝试并行使用多核 CPU，同时让每一个 CPU 核构建1个模块。{{< hint warning >}}maven-shade-plugin 现存的 bug 可能会在并行构建时产生死锁。建议分2步进行构建：首先使用并行方式运行 `mvn validate/test-compile/test`，然后使用单线程方式运行 `mvn package/verify/install`。{{< /hint >}} 
 
+构建脚本如下：
 ```bash
-mvn clean install -DskipTests -Dfast
+mvn clean install -DskipTests -Dfast -Pskip-webui-build -T 1C
 ```
+`fast` 和 `skip-webui-build` 这两个 Maven profiles 对整体构建时间影响比较大，特别是在存储设备比较慢的机器上，因为对应的任务会读写很多小文件。
 
 <a name="build-pyflink"/>
 

@@ -41,6 +41,7 @@ import org.elasticsearch.action.ActionRequest;
 import org.junit.Test;
 import org.mockito.Mockito;
 
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.mockito.Mockito.doAnswer;
@@ -74,6 +75,7 @@ public class Elasticsearch7DynamicSinkTest extends TestLogger {
                         new Elasticsearch7Configuration(
                                 getConfig(), this.getClass().getClassLoader()),
                         schema,
+                        ZoneId.systemDefault(),
                         provider);
 
         testSink.getSinkRuntimeProvider(new MockSinkContext()).createSinkFunction();
@@ -110,6 +112,7 @@ public class Elasticsearch7DynamicSinkTest extends TestLogger {
                         new Elasticsearch7Configuration(
                                 configuration, this.getClass().getClassLoader()),
                         schema,
+                        ZoneId.systemDefault(),
                         provider);
 
         testSink.getSinkRuntimeProvider(new MockSinkContext()).createSinkFunction();
@@ -143,6 +146,7 @@ public class Elasticsearch7DynamicSinkTest extends TestLogger {
                         new Elasticsearch7Configuration(
                                 configuration, this.getClass().getClassLoader()),
                         schema,
+                        ZoneId.systemDefault(),
                         provider);
 
         testSink.getSinkRuntimeProvider(new MockSinkContext()).createSinkFunction();

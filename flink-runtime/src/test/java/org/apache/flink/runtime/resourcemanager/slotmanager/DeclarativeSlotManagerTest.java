@@ -27,7 +27,6 @@ import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.clusterframework.types.SlotID;
 import org.apache.flink.runtime.concurrent.ComponentMainThreadExecutorServiceAdapter;
-import org.apache.flink.runtime.concurrent.ManuallyTriggeredScheduledExecutor;
 import org.apache.flink.runtime.instance.InstanceID;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.metrics.MetricRegistry;
@@ -46,16 +45,20 @@ import org.apache.flink.runtime.taskexecutor.TestingTaskExecutorGatewayBuilder;
 import org.apache.flink.runtime.taskexecutor.exceptions.SlotAllocationException;
 import org.apache.flink.runtime.taskexecutor.exceptions.SlotOccupiedException;
 import org.apache.flink.runtime.testutils.SystemExitTrackingSecurityManager;
-import org.apache.flink.runtime.testutils.TestingUtils;
+import org.apache.flink.testutils.TestingUtils;
+import org.apache.flink.testutils.executor.TestExecutorResource;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.concurrent.FutureUtils;
+import org.apache.flink.util.concurrent.ManuallyTriggeredScheduledExecutor;
 import org.apache.flink.util.concurrent.ScheduledExecutor;
+import org.apache.flink.util.concurrent.ScheduledExecutorServiceAdapter;
 import org.apache.flink.util.function.FunctionUtils;
 import org.apache.flink.util.function.ThrowingConsumer;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
+import org.junit.ClassRule;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -70,6 +73,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -92,6 +96,10 @@ import static org.junit.Assert.assertTrue;
 
 /** Tests for the {@link DeclarativeSlotManager}. */
 public class DeclarativeSlotManagerTest extends TestLogger {
+
+    @ClassRule
+    public static final TestExecutorResource<ScheduledExecutorService> EXECUTOR_RESOURCE =
+            TestingUtils.defaultExecutorResource();
 
     private static final FlinkException TEST_EXCEPTION = new FlinkException("Test exception");
 
@@ -616,7 +624,7 @@ public class DeclarativeSlotManagerTest extends TestLogger {
 
         final SlotReport slotReport = createSlotReport(taskManagerConnection.getResourceID(), 2);
 
-        final Executor mainThreadExecutor = TestingUtils.defaultExecutor();
+        final Executor mainThreadExecutor = EXECUTOR_RESOURCE.getExecutor();
 
         try (DeclarativeSlotManager slotManager = createDeclarativeSlotManagerBuilder().build()) {
 
@@ -752,9 +760,7 @@ public class DeclarativeSlotManagerTest extends TestLogger {
         final ScheduledExecutor mainThreadExecutor = new ManuallyTriggeredScheduledExecutor();
 
         try (final DeclarativeSlotManager slotManager =
-                createDeclarativeSlotManagerBuilder()
-                        .setScheduledExecutor(mainThreadExecutor)
-                        .build()) {
+                createDeclarativeSlotManagerBuilder(mainThreadExecutor).build()) {
 
             slotManager.start(
                     ResourceManagerId.generate(),
@@ -1526,14 +1532,21 @@ public class DeclarativeSlotManagerTest extends TestLogger {
             ResourceManagerId resourceManagerId,
             ResourceActions resourceManagerActions,
             int numSlotsPerWorker) {
-        return createDeclarativeSlotManagerBuilder()
+        return createDeclarativeSlotManagerBuilder(
+                        new ScheduledExecutorServiceAdapter(EXECUTOR_RESOURCE.getExecutor()))
                 .setNumSlotsPerWorker(numSlotsPerWorker)
                 .setRedundantTaskManagerNum(0)
                 .buildAndStartWithDirectExec(resourceManagerId, resourceManagerActions);
     }
 
     private static DeclarativeSlotManagerBuilder createDeclarativeSlotManagerBuilder() {
-        return DeclarativeSlotManagerBuilder.newBuilder()
+        return createDeclarativeSlotManagerBuilder(
+                new ScheduledExecutorServiceAdapter(EXECUTOR_RESOURCE.getExecutor()));
+    }
+
+    private static DeclarativeSlotManagerBuilder createDeclarativeSlotManagerBuilder(
+            ScheduledExecutor executor) {
+        return DeclarativeSlotManagerBuilder.newBuilder(executor)
                 .setDefaultWorkerResourceSpec(WORKER_RESOURCE_SPEC);
     }
 

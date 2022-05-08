@@ -18,24 +18,26 @@
 
 import { HttpEvent, HttpHandler, HttpInterceptor, HttpRequest } from '@angular/common/http';
 import { Injectable, Injector } from '@angular/core';
-import { throwError, Observable } from 'rxjs';
+import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
-import { NzNotificationService } from 'ng-zorro-antd/notification';
+import { NzNotificationService, NzNotificationDataOptions } from 'ng-zorro-antd/notification';
 
-import { SafeAny } from 'interfaces';
 import { StatusService } from 'services';
 
 @Injectable()
 export class AppInterceptor implements HttpInterceptor {
-  constructor(private injector: Injector) {}
+  constructor(private readonly injector: Injector) {}
 
-  intercept(req: HttpRequest<SafeAny>, next: HttpHandler): Observable<HttpEvent<SafeAny>> {
-    /**
-     * Error response from below url should be ignored
-     */
+  intercept(req: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
+    // Error response from below url should be ignored
     const ignoreErrorUrlEndsList = ['checkpoints/config', 'checkpoints'];
     const ignoreErrorMessage = ['File not found.'];
+    const option: NzNotificationDataOptions = {
+      nzDuration: 0,
+      nzStyle: { width: 'auto', 'white-space': 'pre-wrap' }
+    };
+
     return next.handle(req).pipe(
       catchError(res => {
         const errorMessage = res && res.error && res.error.errors && res.error.errors[0];
@@ -47,7 +49,7 @@ export class AppInterceptor implements HttpInterceptor {
           this.injector.get<StatusService>(StatusService).listOfErrorMessage.push(errorMessage);
           this.injector
             .get<NzNotificationService>(NzNotificationService)
-            .info('Server Response Message:', errorMessage);
+            .info('Server Response Message:', errorMessage.replaceAll(' at ', '\n at '), option);
         }
         return throwError(res);
       })

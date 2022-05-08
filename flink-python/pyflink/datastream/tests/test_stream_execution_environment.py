@@ -39,7 +39,6 @@ from pyflink.datastream.slot_sharing_group import MemorySize
 from pyflink.datastream.tests.test_util import DataStreamTestSinkFunction
 from pyflink.find_flink_home import _find_flink_source_root
 from pyflink.java_gateway import get_gateway
-from pyflink.pyflink_gateway_server import on_windows
 from pyflink.table import DataTypes, CsvTableSource, CsvTableSink, StreamTableEnvironment, \
     EnvironmentSettings
 from pyflink.testing.test_case_utils import PyFlinkTestCase, exec_insert_table
@@ -404,7 +403,7 @@ class StreamExecutionEnvironmentTests(PyFlinkTestCase):
         from pyflink.table.expressions import col
         add_three = udf(plus_three, result_type=DataTypes.BIGINT())
 
-        tab = t_env.from_data_stream(ds, 'a') \
+        tab = t_env.from_data_stream(ds, col('a')) \
                    .select(add_three(col('a')))
         t_env.to_append_stream(tab, Types.ROW([Types.LONG()])) \
              .map(lambda i: i[0]) \
@@ -446,10 +445,10 @@ class StreamExecutionEnvironmentTests(PyFlinkTestCase):
             from test_dep2 import add_three
             return add_three(value)
 
+        env.add_python_file(python_file_path)
         t_env = StreamTableEnvironment.create(
             stream_execution_environment=env,
             environment_settings=EnvironmentSettings.in_streaming_mode())
-        env.add_python_file(python_file_path)
 
         from pyflink.table.udf import udf
         from pyflink.table.expressions import col
@@ -554,14 +553,10 @@ class StreamExecutionEnvironmentTests(PyFlinkTestCase):
         expected.sort()
         self.assertEqual(expected, result)
 
-    @unittest.skipIf(on_windows(), "Symbolic link is not supported on Windows, skipping.")
     def test_set_stream_env(self):
         import sys
-        python_exec = sys.executable
-        tmp_dir = self.tempdir
         env = self.env
-        python_exec_link_path = os.path.join(tmp_dir, "py_exec")
-        os.symlink(python_exec, python_exec_link_path)
+        python_exec_link_path = sys.executable
         env.set_python_executable(python_exec_link_path)
 
         def check_python_exec(i):
@@ -683,13 +678,15 @@ class StreamExecutionEnvironmentTests(PyFlinkTestCase):
         # The parallelism of Sink: Test Sink should be 4
         self.assertEqual(nodes[4]['parallelism'], 4)
 
-        env_config_with_dependencies = dict(get_gateway().jvm.org.apache.flink.python.util
-                                            .PythonConfigUtil.getEnvConfigWithDependencies(
-            env._j_stream_execution_environment).toMap())
+        python_dependency_config = dict(
+            get_gateway().jvm.org.apache.flink.python.util.PythonDependencyUtils.
+            configurePythonDependencies(
+                env._j_stream_execution_environment.getCachedFiles(),
+                env._j_stream_execution_environment.getConfiguration()).toMap())
 
         # Make sure that user specified files and archives are correctly added.
-        self.assertIsNotNone(env_config_with_dependencies['python.files'])
-        self.assertIsNotNone(env_config_with_dependencies['python.archives'])
+        self.assertIsNotNone(python_dependency_config['python.internal.files-key-map'])
+        self.assertIsNotNone(python_dependency_config['python.internal.archives-key-map'])
 
     def test_register_slot_sharing_group(self):
         slot_sharing_group_1 = SlotSharingGroup.builder('slot_sharing_group_1') \
@@ -721,6 +718,18 @@ class StreamExecutionEnvironmentTests(PyFlinkTestCase):
         self.assertEqual(MemorySize(j_memory_size=j_resource_profile_2.getTaskHeapMemory()),
                          MemorySize.of_mebi_bytes(200))
         self.assertFalse(j_resource_profile_3.isPresent())
+
+    def test_register_cached_file(self):
+        texts = ['machen', 'zeit', 'heerscharen', 'keiner', 'meine']
+        text_path = self.tempdir + '/text_file'
+        with open(text_path, 'a') as f:
+            for text in texts:
+                f.write(text)
+                f.write('\n')
+        self.env.register_cached_file(text_path, 'cache_test')
+        cached_files = self.env._j_stream_execution_environment.getCachedFiles()
+        self.assertEqual(cached_files.size(), 1)
+        self.assertEqual(cached_files[0].getField(0), 'cache_test')
 
     def tearDown(self) -> None:
         self.test_sink.clear()

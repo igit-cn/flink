@@ -24,6 +24,7 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsReadingMetadata;
@@ -39,8 +40,6 @@ import org.apache.flink.table.planner.plan.utils.NestedProjectionUtil;
 import org.apache.flink.table.planner.plan.utils.NestedSchema;
 import org.apache.flink.table.planner.plan.utils.RexNodeExtractor;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.utils.DataTypeUtils;
-import org.apache.flink.table.types.utils.TypeConversions;
 
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
@@ -62,7 +61,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.planner.connectors.DynamicSourceUtils.createProducedType;
-import static org.apache.flink.table.planner.connectors.DynamicSourceUtils.createRequiredMetadataKeys;
+import static org.apache.flink.table.planner.connectors.DynamicSourceUtils.createRequiredMetadataColumns;
 import static org.apache.flink.table.planner.utils.ShortcutUtils.unwrapContext;
 import static org.apache.flink.table.planner.utils.ShortcutUtils.unwrapTypeFactory;
 
@@ -136,7 +135,7 @@ public class PushProjectIntoTableSourceScanRule
         }
 
         final FlinkTypeFactory typeFactory = unwrapTypeFactory(scan);
-        final ResolvedSchema schema = sourceTable.catalogTable().getResolvedSchema();
+        final ResolvedSchema schema = sourceTable.contextResolvedTable().getResolvedSchema();
         final RowType producedType = createProducedType(schema, sourceTable.tableSource());
         final NestedSchema projectedSchema =
                 NestedProjectionUtil.build(
@@ -203,15 +202,18 @@ public class PushProjectIntoTableSourceScanRule
         return projections;
     }
 
-    private static boolean requiresPrimaryKey(TableSourceTable table, TableConfig config) {
-        return DynamicSourceUtils.isUpsertSource(table.catalogTable(), table.tableSource())
+    private static boolean requiresPrimaryKey(TableSourceTable table, TableConfig tableConfig) {
+        return DynamicSourceUtils.isUpsertSource(
+                        table.contextResolvedTable().getResolvedSchema(), table.tableSource())
                 || DynamicSourceUtils.isSourceChangeEventsDuplicate(
-                        table.catalogTable(), table.tableSource(), config);
+                        table.contextResolvedTable().getResolvedSchema(),
+                        table.tableSource(),
+                        tableConfig);
     }
 
     private List<RexNode> getPrimaryKeyProjections(LogicalTableScan scan) {
         final TableSourceTable source = scan.getTable().unwrap(TableSourceTable.class);
-        final ResolvedSchema schema = source.catalogTable().getResolvedSchema();
+        final ResolvedSchema schema = source.contextResolvedTable().getResolvedSchema();
         if (!schema.getPrimaryKey().isPresent()) {
             return Collections.emptyList();
         }
@@ -247,11 +249,16 @@ public class PushProjectIntoTableSourceScanRule
         final List<NestedColumn> projectedMetadataColumns;
         if (supportsMetadata(source.tableSource())) {
             final List<String> declaredMetadataKeys =
-                    createRequiredMetadataKeys(
-                            source.catalogTable().getResolvedSchema(), source.tableSource());
+                    createRequiredMetadataColumns(
+                                    source.contextResolvedTable().getResolvedSchema(),
+                                    source.tableSource())
+                            .stream()
+                            .map(col -> col.getMetadataKey().orElse(col.getName()))
+                            .collect(Collectors.toList());
 
             numPhysicalColumns = producedType.getFieldCount() - declaredMetadataKeys.size();
 
+            // the projected metadata column name
             projectedMetadataColumns =
                     IntStream.range(0, declaredMetadataKeys.size())
                             .mapToObj(i -> producedType.getFieldNames().get(numPhysicalColumns + i))
@@ -292,21 +299,33 @@ public class PushProjectIntoTableSourceScanRule
             metaColumn.setIndexOfLeafInNewSchema(newIndex++);
         }
 
-        final RowType newProducedType =
-                (RowType)
-                        DataTypeUtils.projectRow(
-                                        TypeConversions.fromLogicalToDataType(producedType),
-                                        projectedFields)
-                                .getLogicalType();
-
         if (supportsProjectionPushDown(source.tableSource())) {
-            abilitySpecs.add(new ProjectPushDownSpec(physicalProjections, newProducedType));
+            final RowType projectedPhysicalType =
+                    (RowType) Projection.of(physicalProjections).project(producedType);
+            abilitySpecs.add(new ProjectPushDownSpec(physicalProjections, projectedPhysicalType));
         }
 
+        final RowType newProducedType =
+                (RowType) Projection.of(projectedFields).project(producedType);
+
         if (supportsMetadata(source.tableSource())) {
+            // Use the projected column name to get the metadata key
             final List<String> projectedMetadataKeys =
                     projectedMetadataColumns.stream()
-                            .map(NestedColumn::name)
+                            .map(
+                                    nestedColumn ->
+                                            source.contextResolvedTable()
+                                                    .getResolvedSchema()
+                                                    .getColumn(nestedColumn.name())
+                                                    .orElseThrow(
+                                                            () ->
+                                                                    new TableException(
+                                                                            String.format(
+                                                                                    "Can not find the column %s in the origin schema.",
+                                                                                    nestedColumn
+                                                                                            .name()))))
+                            .map(Column.MetadataColumn.class::cast)
+                            .map(col -> col.getMetadataKey().orElse(col.getName()))
                             .collect(Collectors.toList());
 
             abilitySpecs.add(new ReadingMetadataSpec(projectedMetadataKeys, newProducedType));

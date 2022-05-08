@@ -21,6 +21,7 @@ package org.apache.flink.runtime.io.network.partition;
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.runtime.event.AbstractEvent;
+import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.io.network.buffer.Buffer;
 import org.apache.flink.runtime.io.network.buffer.BufferBuilderTestUtils;
 import org.apache.flink.runtime.io.network.buffer.BufferConsumer;
@@ -28,12 +29,13 @@ import org.apache.flink.runtime.io.network.util.TestConsumerCallback;
 import org.apache.flink.runtime.io.network.util.TestProducerSource;
 import org.apache.flink.runtime.io.network.util.TestSubpartitionConsumer;
 import org.apache.flink.runtime.io.network.util.TestSubpartitionProducer;
+import org.apache.flink.testutils.executor.TestExecutorResource;
 import org.apache.flink.util.concurrent.FutureUtils;
 import org.apache.flink.util.function.CheckedSupplier;
 
-import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Assume;
+import org.junit.ClassRule;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -61,12 +63,9 @@ import static org.mockito.Mockito.when;
 public class PipelinedSubpartitionTest extends SubpartitionTestBase {
 
     /** Executor service for concurrent produce/consume tests. */
-    private static final ExecutorService executorService = Executors.newCachedThreadPool();
-
-    @AfterClass
-    public static void shutdownExecutorService() throws Exception {
-        executorService.shutdownNow();
-    }
+    @ClassRule
+    public static final TestExecutorResource<ExecutorService> EXECUTOR_RESOURCE =
+            new TestExecutorResource<>(() -> Executors.newCachedThreadPool());
 
     @Override
     PipelinedSubpartition createSubpartition() throws Exception {
@@ -206,10 +205,10 @@ public class PipelinedSubpartitionTest extends SubpartitionTestBase {
 
         CompletableFuture<Boolean> producerResult =
                 CompletableFuture.supplyAsync(
-                        CheckedSupplier.unchecked(producer::call), executorService);
+                        CheckedSupplier.unchecked(producer::call), EXECUTOR_RESOURCE.getExecutor());
         CompletableFuture<Boolean> consumerResult =
                 CompletableFuture.supplyAsync(
-                        CheckedSupplier.unchecked(consumer::call), executorService);
+                        CheckedSupplier.unchecked(consumer::call), EXECUTOR_RESOURCE.getExecutor());
 
         FutureUtils.waitForAll(Arrays.asList(producerResult, consumerResult))
                 .get(60_000L, TimeUnit.MILLISECONDS);
@@ -275,8 +274,8 @@ public class PipelinedSubpartitionTest extends SubpartitionTestBase {
         if (!buffer2Recycled) {
             Assert.fail("buffer 2 not recycled");
         }
-        assertEquals(2, partition.getTotalNumberOfBuffers());
-        assertEquals(0, partition.getTotalNumberOfBytes()); // buffer data is never consumed
+        assertEquals(2, partition.getTotalNumberOfBuffersUnsafe());
+        assertEquals(0, partition.getTotalNumberOfBytesUnsafe()); // buffer data is never consumed
     }
 
     @Test
@@ -336,6 +335,18 @@ public class PipelinedSubpartitionTest extends SubpartitionTestBase {
         assertEquals(-1, subpartition.add(createFilledFinishedBufferConsumer(4)));
     }
 
+    @Test
+    public void testProducerFailedException() {
+        PipelinedSubpartition subpartition =
+                new FailurePipelinedSubpartition(0, 2, PartitionTestUtils.createPartition());
+
+        ResultSubpartitionView view =
+                subpartition.createReadView(new NoOpBufferAvailablityListener());
+
+        assertNotNull(view.getFailureCause());
+        assertTrue(view.getFailureCause() instanceof CancelTaskException);
+    }
+
     private void verifyViewReleasedAfterParentRelease(ResultSubpartition partition)
             throws Exception {
         // Add a bufferConsumer
@@ -368,5 +379,18 @@ public class PipelinedSubpartitionTest extends SubpartitionTestBase {
 
     public static PipelinedSubpartition createPipelinedSubpartition(ResultPartition parent) {
         return new PipelinedSubpartition(0, 2, parent);
+    }
+
+    private static class FailurePipelinedSubpartition extends PipelinedSubpartition {
+
+        FailurePipelinedSubpartition(
+                int index, int receiverExclusiveBuffersPerChannel, ResultPartition parent) {
+            super(index, receiverExclusiveBuffersPerChannel, parent);
+        }
+
+        @Override
+        Throwable getFailureCause() {
+            return new RuntimeException("Expected test exception");
+        }
     }
 }

@@ -18,14 +18,12 @@
 package org.apache.flink.connector.base.sink;
 
 import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.api.connector.sink.Committer;
-import org.apache.flink.api.connector.sink.GlobalCommitter;
-import org.apache.flink.api.connector.sink.Sink;
-import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.api.connector.sink2.StatefulSink;
+import org.apache.flink.connector.base.sink.writer.BufferedRequestState;
+import org.apache.flink.connector.base.sink.writer.ElementConverter;
+import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
-import java.util.Collection;
-import java.util.Optional;
 
 /**
  * A generic sink for destinations that provide an async client to persist data.
@@ -47,25 +45,61 @@ import java.util.Optional;
  */
 @PublicEvolving
 public abstract class AsyncSinkBase<InputT, RequestEntryT extends Serializable>
-        implements Sink<InputT, Void, Collection<RequestEntryT>, Void> {
+        implements StatefulSink<InputT, BufferedRequestState<RequestEntryT>> {
 
-    @Override
-    public Optional<Committer<Void>> createCommitter() {
-        return Optional.empty();
+    private final ElementConverter<InputT, RequestEntryT> elementConverter;
+    private final int maxBatchSize;
+    private final int maxInFlightRequests;
+    private final int maxBufferedRequests;
+    private final long maxBatchSizeInBytes;
+    private final long maxTimeInBufferMS;
+    private final long maxRecordSizeInBytes;
+
+    protected AsyncSinkBase(
+            ElementConverter<InputT, RequestEntryT> elementConverter,
+            int maxBatchSize,
+            int maxInFlightRequests,
+            int maxBufferedRequests,
+            long maxBatchSizeInBytes,
+            long maxTimeInBufferMS,
+            long maxRecordSizeInBytes) {
+        this.elementConverter =
+                Preconditions.checkNotNull(
+                        elementConverter,
+                        "ElementConverter must be not null when initializing the AsyncSinkBase.");
+        this.maxBatchSize = maxBatchSize;
+        this.maxInFlightRequests = maxInFlightRequests;
+        this.maxBufferedRequests = maxBufferedRequests;
+        this.maxBatchSizeInBytes = maxBatchSizeInBytes;
+        this.maxTimeInBufferMS = maxTimeInBufferMS;
+        this.maxRecordSizeInBytes = maxRecordSizeInBytes;
     }
 
-    @Override
-    public Optional<GlobalCommitter<Void, Void>> createGlobalCommitter() {
-        return Optional.empty();
+    protected ElementConverter<InputT, RequestEntryT> getElementConverter() {
+        return elementConverter;
     }
 
-    @Override
-    public Optional<SimpleVersionedSerializer<Void>> getCommittableSerializer() {
-        return Optional.empty();
+    protected int getMaxBatchSize() {
+        return maxBatchSize;
     }
 
-    @Override
-    public Optional<SimpleVersionedSerializer<Void>> getGlobalCommittableSerializer() {
-        return Optional.empty();
+    protected int getMaxInFlightRequests() {
+        return maxInFlightRequests;
+    }
+
+    protected int getMaxBufferedRequests() {
+        return maxBufferedRequests;
+    }
+
+    protected long getMaxBatchSizeInBytes() {
+        return maxBatchSizeInBytes;
+    }
+
+    protected long getMaxTimeInBufferMS() {
+        return maxTimeInBufferMS;
+    }
+
+    protected long getMaxRecordSizeInBytes() {
+        return maxRecordSizeInBytes;
     }
 }

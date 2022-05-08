@@ -20,6 +20,7 @@ package org.apache.flink.connectors.hive;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -40,6 +41,7 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.table.catalog.hive.HiveCatalog;
 import org.apache.flink.table.catalog.hive.HiveTestUtils;
+import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.TableSourceFactory;
@@ -47,7 +49,6 @@ import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
 import org.apache.flink.table.planner.runtime.utils.BatchAbstractTestBase;
 import org.apache.flink.table.planner.utils.TableTestUtil;
-import org.apache.flink.test.util.TestBaseUtils;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.CollectionUtil;
@@ -472,9 +473,7 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
                         "select * from hive.source_db.test_parallelism_setting_with_file_num");
         testParallelismSettingTranslateAndAssert(3, table, tEnv);
 
-        tEnv.getConfig()
-                .getConfiguration()
-                .setInteger(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM_MAX, 2);
+        tEnv.getConfig().set(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM_MAX, 2);
         testParallelismSettingTranslateAndAssert(2, table, tEnv);
     }
 
@@ -495,12 +494,8 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
         final String dbName = "source_db";
         final String tblName = "test_parallelism_limit_pushdown";
         TableEnvironment tEnv = createTableEnv();
-        tEnv.getConfig()
-                .getConfiguration()
-                .setBoolean(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM, false);
-        tEnv.getConfig()
-                .getConfiguration()
-                .setInteger(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
+        tEnv.getConfig().set(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM, false);
+        tEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
         tEnv.executeSql(
                 "CREATE TABLE source_db.test_parallelism_limit_pushdown "
                         + "(`year` STRING, `value` INT) partitioned by (pt int)");
@@ -535,9 +530,7 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.registerCatalog("hive", hiveCatalog);
         tEnv.useCatalog("hive");
-        tEnv.getConfig()
-                .getConfiguration()
-                .setBoolean(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM, false);
+        tEnv.getConfig().set(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM, false);
         tEnv.executeSql(
                 "CREATE TABLE source_db.test_parallelism_no_infer "
                         + "(`year` STRING, `value` INT) partitioned by (pt int)");
@@ -570,7 +563,7 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
     @Test
     public void testSourceConfig() throws Exception {
         // vector reader not available for 1.x and we're not testing orc for 2.0.x
-        Assume.assumeTrue(HiveVersionTestUtil.HIVE_210_OR_LATER);
+        Assume.assumeTrue(HiveVersionTestUtil.HIVE_230_OR_LATER);
         Map<String, String> env = System.getenv();
         batchTableEnv.executeSql("create database db1");
         try {
@@ -579,7 +572,7 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
             testSourceConfig(true, true);
             testSourceConfig(false, false);
         } finally {
-            TestBaseUtils.setEnv(env);
+            CommonTestUtils.setEnv(env);
             batchTableEnv.executeSql("drop database db1 cascade");
         }
     }
@@ -772,9 +765,7 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         StreamTableEnvironment tEnv =
                 HiveTestUtils.createTableEnvInStreamingMode(env, SqlDialect.HIVE);
-        tEnv.getConfig()
-                .getConfiguration()
-                .setBoolean(HiveOptions.TABLE_EXEC_HIVE_FALLBACK_MAPRED_READER, useMapredReader);
+        tEnv.getConfig().set(HiveOptions.TABLE_EXEC_HIVE_FALLBACK_MAPRED_READER, useMapredReader);
         tEnv.registerCatalog(catalogName, hiveCatalog);
         tEnv.useCatalog(catalogName);
         tEnv.executeSql(
@@ -837,15 +828,10 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
         doReturn(Optional.of(tableFactorySpy)).when(catalogSpy).getTableFactory();
 
         TableEnvironment tableEnv = HiveTestUtils.createTableEnvInBatchMode();
+        tableEnv.getConfig().set(HiveOptions.TABLE_EXEC_HIVE_FALLBACK_MAPRED_READER, fallbackMR);
         tableEnv.getConfig()
-                .getConfiguration()
-                .setBoolean(HiveOptions.TABLE_EXEC_HIVE_FALLBACK_MAPRED_READER, fallbackMR);
-        tableEnv.getConfig()
-                .getConfiguration()
-                .setBoolean(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM, inferParallelism);
-        tableEnv.getConfig()
-                .getConfiguration()
-                .setInteger(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
+                .set(HiveOptions.TABLE_EXEC_HIVE_INFER_SOURCE_PARALLELISM, inferParallelism);
+        tableEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
         tableEnv.registerCatalog(catalogSpy.getName(), catalogSpy);
         tableEnv.useCatalog(catalogSpy.getName());
 
@@ -959,9 +945,10 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
         }
 
         @Override
-        public DataStream<RowData> getDataStream(StreamExecutionEnvironment execEnv) {
+        public DataStream<RowData> getDataStream(
+                ProviderContext providerContext, StreamExecutionEnvironment execEnv) {
             DataStreamSource<RowData> dataStream =
-                    (DataStreamSource<RowData>) super.getDataStream(execEnv);
+                    (DataStreamSource<RowData>) super.getDataStream(providerContext, execEnv);
             int parallelism = dataStream.getTransformation().getParallelism();
             assertEquals(inferParallelism ? 1 : 2, parallelism);
             return dataStream;

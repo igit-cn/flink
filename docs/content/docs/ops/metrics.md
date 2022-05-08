@@ -884,8 +884,8 @@ Metrics related to data exchange between task executors using netty network comm
   </thead>
   <tbody>
     <tr>
-      <th rowspan="6"><strong>TaskManager</strong></th>
-      <td rowspan="6">Status.Shuffle.Netty</td>
+      <th rowspan="7"><strong>TaskManager</strong></th>
+      <td rowspan="7">Status.Shuffle.Netty</td>
       <td>AvailableMemorySegments</td>
       <td>The number of unused memory segments.</td>
       <td>Gauge</td>
@@ -916,10 +916,20 @@ Metrics related to data exchange between task executors using netty network comm
       <td>Gauge</td>
     </tr>
     <tr>
-      <th rowspan="18">Task</th>
-      <td rowspan="4">Shuffle.Netty.Input.Buffers</td>
+      <td>RequestedMemoryUsage</td>
+      <td>Experimental: The usage of the network memory. Shows (as percentage) the total amount of requested memory from all of the subtasks. It can exceed 100% as not all requested memory is required for subtask to make progress. However if usage exceeds 100% throughput can suffer greatly and please consider increasing available network memory, or decreasing configured size of network buffer pools.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <th rowspan="20">Task</th>
+      <td rowspan="5">Shuffle.Netty.Input.Buffers</td>
       <td>inputQueueLength</td>
       <td>The number of queued input buffers.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>inputQueueSize</td>
+      <td>The real size of queued input buffers in bytes. The size for local input channels is always `0` since the local channel takes records directly from the output queue.</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -938,9 +948,14 @@ Metrics related to data exchange between task executors using netty network comm
       <td>Gauge</td>
     </tr>
     <tr>
-      <td rowspan="2">Shuffle.Netty.Output.Buffers</td>
+      <td rowspan="3">Shuffle.Netty.Output.Buffers</td>
       <td>outputQueueLength</td>
       <td>The number of queued output buffers.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>outputQueueSize</td>
+      <td>The real size of queued output buffers in bytes. </td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1026,9 +1041,14 @@ Metrics related to data exchange between task executors using netty network comm
   </thead>
   <tbody>
     <tr>
-      <th rowspan="4"><strong>JobManager</strong></th>
+      <th rowspan="5"><strong>JobManager</strong></th>
       <td>numRegisteredTaskManagers</td>
       <td>The number of registered taskmanagers.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>numPendingTaskManagers</td>
+      <td>(only applicable to Native Kubernetes / YARN) The number of outstanding taskmanagers that Flink has requested.</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1051,8 +1071,78 @@ Metrics related to data exchange between task executors using netty network comm
 
 ### Availability
 
-{{< hint warning >}}
-If [Reactive Mode]({{< ref "docs/deployment/elastic_scaling" >}}#reactive-mode) is enabled then these metrics, except `numRestarts`, do not work correctly.
+The metrics in this table are available for each of the following job states: INITIALIZING, CREATED, RUNNING, RESTARTING, CANCELLING, FAILING.
+Whether these metrics are reported depends on the [metrics.job.status.enable]({{< ref "docs/deployment/config" >}}#metrics-job-status-enable) setting.
+
+<span class="label label-info">Evolving</span> The semantics of these metrics may change in later releases.
+
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th class="text-left" style="width: 18%">Scope</th>
+      <th class="text-left" style="width: 26%">Metrics</th>
+      <th class="text-left" style="width: 48%">Description</th>
+      <th class="text-left" style="width: 8%">Type</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th rowspan="3"><strong>Job (only available on JobManager)</strong></th>
+      <td>&lt;jobStatus&gt;State</td>
+      <td>For a given state, return 1 if the job is currently in that state, otherwise return 0.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>&lt;jobStatus&gt;Time</td>
+      <td>For a given state, if the job is currently in that state, return the time (in milliseconds) since the job transitioned into that state, otherwise return 0.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>&lt;jobStatus&gt;TimeTotal</td>
+      <td>For a given state, return how much time (in milliseconds) the job has spent in that state in total.</td>
+      <td>Gauge</td>
+    </tr>
+  </tbody>
+</table>
+
+{{< hint info >}}
+<span class="label label-info">Experimental</span>
+
+While the job is in the RUNNING state the metrics in this table provide additional details on what the job is currently doing.
+Whether these metrics are reported depends on the [metrics.job.status.enable]({{< ref "docs/deployment/config" >}}#metrics-job-status-enable) setting.
+
+<table class="table table-bordered table-inline">
+  <thead>
+    <tr>
+      <th class="text-left" style="width: 18%">Scope</th>
+      <th class="text-left" style="width: 26%">Metrics</th>
+      <th class="text-left" style="width: 48%">Description</th>
+      <th class="text-left" style="width: 8%">Type</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th rowspan="3"><strong>Job (only available on JobManager)</strong></th>
+      <td>deployingState</td>
+      <td>Return 1 if the job is currently deploying* tasks, otherwise return 0.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>deployingTime</td>
+      <td>Return the time (in milliseconds) since the job has started deploying* tasks, otherwise return 0.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>deployingTimeTotal</td>
+      <td>Return how much time (in milliseconds) the job has spent deploying* tasks in total.</td>
+      <td>Gauge</td>
+    </tr>
+  </tbody>
+</table>
+
+*A job is considered to be deploying tasks when:
+* for streaming jobs, any task is in the DEPLOYING state
+* for batch jobs, if at least 1 task is in the DEPLOYING state, and there are no INITIALIZING/RUNNING tasks
 {{< /hint >}}
 
 <table class="table table-bordered">
@@ -1066,25 +1156,14 @@ If [Reactive Mode]({{< ref "docs/deployment/elastic_scaling" >}}#reactive-mode) 
   </thead>
   <tbody>
     <tr>
-      <th rowspan="5"><strong>Job (only available on JobManager)</strong></th>
-      <td>restartingTime</td>
-      <td>The time it took to restart the job, or how long the current restart has been in progress (in milliseconds).</td>
-      <td>Gauge</td>
-    </tr>
-    <tr>
+      <th rowspan="4"><strong>Job (only available on JobManager)</strong></th>
       <td>uptime</td>
-      <td>
-        The time that the job has been running without interruption.
-        <p>Returns -1 for completed jobs (in milliseconds).</p>
-      </td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <b>runningTime</b>.</td>
       <td>Gauge</td>
     </tr>
     <tr>
       <td>downtime</td>
-      <td>
-        For jobs currently in a failing/recovering situation, the time elapsed during this outage.
-        <p>Returns 0 for running jobs and -1 for completed jobs (in milliseconds).</p>
-      </td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <b>restartingTime</b>, <b>cancellingTime</b> <b>failingTime</b>.</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1101,10 +1180,6 @@ If [Reactive Mode]({{< ref "docs/deployment/elastic_scaling" >}}#reactive-mode) 
 </table>
 
 ### Checkpointing
-
-{{< hint warning >}}
-If [Reactive Mode]({{< ref "docs/deployment/elastic_scaling" >}}#reactive-mode) is enabled then checkpointing metrics with the `Job` scope do not work correctly.
-{{< /hint >}}
 
 Note that for failed checkpoints, metrics are updated on a best efforts basis and may be not accurate.
 <table class="table table-bordered">
@@ -1125,7 +1200,12 @@ Note that for failed checkpoints, metrics are updated on a best efforts basis an
     </tr>
     <tr>
       <td>lastCheckpointSize</td>
-      <td>The total size of the last checkpoint (in bytes).</td>
+      <td>The checkpointed size of the last checkpoint (in bytes), this metric could be different from lastCheckpointFullSize if incremental checkpoint or changelog is enabled.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>lastCheckpointFullSize</td>
+      <td>The full size of the last checkpoint (in bytes).</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1175,6 +1255,64 @@ Note that for failed checkpoints, metrics are updated on a best efforts basis an
 ### RocksDB
 Certain RocksDB native metrics are available but disabled by default, you can find full documentation [here]({{< ref "docs/deployment/config" >}}#rocksdb-native-metrics)
 
+### State Changelog
+
+Note that the metrics are only available via reporters.
+
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th class="text-left" style="width: 18%">Scope</th>
+      <th class="text-left" style="width: 26%">Metrics</th>
+      <th class="text-left" style="width: 48%">Description</th>
+      <th class="text-left" style="width: 8%">Type</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th rowspan="20"><strong>Job (only available on TaskManager)</strong></th>
+      <td>numberOfUploadRequests</td>
+      <td>Total number of upload requests made</td>
+      <td>Counter</td>
+    </tr>
+    <tr>
+      <td>numberOfUploadFailures</td>
+      <td>Total number of failed upload requests (request may be retried after the failure)</td>
+      <td>Counter</td>
+    </tr>
+    <tr>
+      <td>attemptsPerUpload</td>
+      <td>The number of attempts per upload</td>
+      <td>Histogram</td>
+    </tr>
+    <tr>
+      <td>totalAttemptsPerUpload</td>
+      <td>The total count distributions of attempts for per upload</td>
+      <td>Histogram</td>
+    </tr>
+    <tr>
+      <td>uploadBatchSizes</td>
+      <td>The number of upload tasks (coming from one or more writers, i.e. backends/tasks) that were grouped together and form a single upload resulting in a single file</td>
+      <td>Histogram</td>
+    </tr>
+    <tr>
+      <td>uploadLatenciesNanos</td>
+      <td>The latency distributions of uploads</td>
+      <td>Histogram</td>
+    </tr>
+    <tr>
+      <td>uploadSizes</td>
+      <td>The size distributions of uploads</td>
+      <td>Histogram</td>
+    </tr>
+    <tr>
+      <td>uploadQueueSize</td>
+      <td>Current size of upload queue. Queue items can be packed together and form a single upload.</td>
+      <td>Gauge</td>
+    </tr>
+  </tbody>
+</table>
+
 ### IO
 <table class="table table-bordered">
   <thead>
@@ -1193,7 +1331,7 @@ Certain RocksDB native metrics are available but disabled by default, you can fi
       <td>Histogram</td>
     </tr>
     <tr>
-      <th rowspan="16"><strong>Task</strong></th>
+      <th rowspan="23"><strong>Task</strong></th>
       <td>numBytesInLocal</td>
       <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{< ref "docs/ops/metrics" >}}#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Counter</td>
@@ -1264,13 +1402,48 @@ Certain RocksDB native metrics are available but disabled by default, you can fi
       <td>Meter</td>
     </tr>
     <tr>
-      <td>backPressuredTimeMsPerSecond</td>
-      <td>The time (in milliseconds) this task is back pressured per second.</td>
+      <td>busyTimeMsPerSecond</td>
+      <td>The time (in milliseconds) this task is busy (neither idle nor back pressured) per second. Can be NaN, if the value could not be calculated.</td>
       <td>Gauge</td>
     </tr>
     <tr>
-      <td>busyTimeMsPerSecond</td>
-      <td>The time (in milliseconds) this task is busy (neither idle nor back pressured) per second. Can be NaN, if the value could not be calculated.</td>
+      <td>backPressuredTimeMsPerSecond</td>
+      <td>The time (in milliseconds) this task is back pressured (soft or hard) per second. It's a sum of softBackPressuredTimeMsPerSecond and hardBackPressuredTimeMsPerSecond.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>softBackPressuredTimeMsPerSecond</td>
+      <td>The time (in milliseconds) this task is softly back pressured per second. Softly back pressured task will be still responsive and capable of for example triggering unaligned checkpoints.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>hardBackPressuredTimeMsPerSecond</td>
+      <td>The time (in milliseconds) this task is back pressured in a hard way per second. During hard back pressured task is completely blocked and unresponsive preventing for example unaligned checkpoints from triggering.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>maxSoftBackPressuredTimeMs</td>
+      <td>Maximum recorded duration of a single consecutive period of the task being softly back pressured in the last sampling period. Please check softBackPressuredTimeMsPerSecond and hardBackPressuredTimeMsPerSecond for more information.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>maxHardBackPressuredTimeMs</td>
+      <td>Maximum recorded duration of a single consecutive period of the task being in the hard back pressure state in the last sampling period. Please check softBackPressuredTimeMsPerSecond and hardBackPressuredTimeMsPerSecond for more information.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>mailboxMailsPerSecond</td>
+      <td>The number of actions processed from the task's mailbox per second which includes all actions, e.g., checkpointing, timer, or cancellation actions.</td>
+      <td>Meter</td>
+    </tr>
+    <tr>
+      <td>mailboxLatencyMs</td>
+      <td>The latency is the time that actions spend waiting in the task's mailbox before being processed. The metric is a statistic of the latency in milliseconds that is measured approximately once every second and includes the last 60 measurements.</td>
+      <td>Histogram</td>
+    </tr>
+    <tr>
+      <td>mailboxQueueSize</td>
+      <td>The number of actions in the task's mailbox that are waiting to be processed.</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1319,7 +1492,7 @@ Certain RocksDB native metrics are available but disabled by default, you can fi
       <td>Gauge</td>
     </tr>
     <tr>
-      <th rowspan="3"><strong>Operator</strong></th>
+      <th rowspan="4"><strong>Operator</strong></th>
       <td>currentInput<strong>N</strong>Watermark</td>
       <td>
         The last watermark this operator has received in its <strong>N'th</strong> input (in milliseconds), with index <strong>N</strong> starting from 1. For example currentInput<strong>1</strong>Watermark, currentInput<strong>2</strong>Watermark, ...
@@ -1331,6 +1504,16 @@ Certain RocksDB native metrics are available but disabled by default, you can fi
       <td>currentOutputWatermark</td>
       <td>
         The last watermark this operator has emitted (in milliseconds).
+      </td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>watermarkAlignmentDrift</td>
+      <td>
+        The current drift from the minimal watermark emitted by all sources/tasks/splits that belong
+        to the same watermark group.
+        <p><strong>Note:</strong> Available only when watermark alignment is enabled and the first common watermark is
+        announced. You can configure the update interval in the WatermarkStrategy.</p>
       </td>
       <td>Gauge</td>
     </tr>
@@ -1347,7 +1530,7 @@ Certain RocksDB native metrics are available but disabled by default, you can fi
 #### Kafka Connectors
 Please refer to [Kafka monitoring]({{< ref "docs/connectors/datastream/kafka" >}}/#monitoring).
 
-#### Kinesis Connectors
+#### Kinesis Source
 <table class="table table-bordered">
   <thead>
     <tr>
@@ -1440,6 +1623,42 @@ Please refer to [Kafka monitoring]({{< ref "docs/connectors/datastream/kafka" >}
   </tbody>
 </table>
 
+#### Kinesis Sink
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th class="text-left" style="width: 15%">Scope</th>
+      <th class="text-left" style="width: 18%">Metrics</th>
+      <th class="text-left" style="width: 39%">Description</th>
+      <th class="text-left" style="width: 10%">Type</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th rowspan="1">Operator</th>
+      <td>numRecordsOutErrors (deprecated, please use numRecordsSendErrors)</td>
+      <td>Number of rejected record writes.</td>
+      <td>Counter</td>
+    </tr>
+  </tbody>
+  <tbody>
+    <tr>
+      <th rowspan="1">Operator</th>
+      <td>numRecordsSendErrors</td>
+      <td>Number of rejected record writes.</td>
+      <td>Counter</td>
+    </tr>
+  </tbody>
+  <tbody>
+    <tr>
+      <th rowspan="1">Operator</th>
+      <td>CurrentSendTime</td>
+      <td>Number of ms taken for 1 round trip of the last request batch.</td>
+      <td>Gauge</td>
+    </tr>
+  </tbody>
+</table>
+
 #### HBase Connectors
 <table class="table table-bordered">
   <thead>
@@ -1472,12 +1691,12 @@ configured interval (`metrics.system-resource-probing-interval`).
 System resources reporting requires an optional dependency to be present on the
 classpath (for example placed in Flink's `lib` directory):
 
-  - `com.github.oshi:oshi-core:3.4.0` (licensed under EPL 1.0 license)
+  - `com.github.oshi:oshi-core:6.1.5` (licensed under MIT license)
 
 Including it's transitive dependencies:
 
-  - `net.java.dev.jna:jna-platform:jar:4.2.2`
-  - `net.java.dev.jna:jna:jar:4.2.2`
+  - `net.java.dev.jna:jna-platform:jar:5.10.0`
+  - `net.java.dev.jna:jna:jar:5.10.0`
 
 Failures in this regard will be reported as warning messages like `NoClassDefFoundError`
 logged by `SystemResourcesMetricsInitializer` during the startup.
@@ -1495,38 +1714,42 @@ logged by `SystemResourcesMetricsInitializer` during the startup.
   </thead>
   <tbody>
     <tr>
-      <th rowspan="12"><strong>Job-/TaskManager</strong></th>
-      <td rowspan="12">System.CPU</td>
+      <th rowspan="13"><strong>Job-/TaskManager</strong></th>
+      <td rowspan="13">System.CPU</td>
       <td>Usage</td>
       <td>Overall % of CPU usage on the machine.</td>
     </tr>
     <tr>
       <td>Idle</td>
-      <td>% of CPU Idle usage on the machine.</td>
+      <td>% of CPU Idle time on the machine.</td>
     </tr>
     <tr>
       <td>Sys</td>
-      <td>% of System CPU usage on the machine.</td>
+      <td>% of System CPU time on the machine.</td>
     </tr>
     <tr>
       <td>User</td>
-      <td>% of User CPU usage on the machine.</td>
+      <td>% of User CPU time on the machine.</td>
     </tr>
     <tr>
       <td>IOWait</td>
-      <td>% of IOWait CPU usage on the machine.</td>
+      <td>% of IOWait CPU time on the machine.</td>
     </tr>
     <tr>
       <td>Irq</td>
-      <td>% of Irq CPU usage on the machine.</td>
+      <td>% of Irq CPU time on the machine.</td>
     </tr>
     <tr>
       <td>SoftIrq</td>
-      <td>% of SoftIrq CPU usage on the machine.</td>
+      <td>% of SoftIrq CPU time on the machine.</td>
     </tr>
     <tr>
       <td>Nice</td>
-      <td>% of Nice Idle usage on the machine.</td>
+      <td>% of Nice CPU time on the machine.</td>
+    </tr>
+    <tr>
+      <td>Steal</td>
+      <td>% of Steal CPU time on the machine.</td>
     </tr>
     <tr>
       <td>Load1min</td>

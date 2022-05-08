@@ -84,20 +84,25 @@ public class ExecutionCheckpointingOptions {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "The tolerable checkpoint failure number. If set to 0, that means "
-                                    + "we do not tolerance any checkpoint failure.");
+                            "The tolerable checkpoint consecutive failure number. If set to 0, that means "
+                                    + "we do not tolerance any checkpoint failure. This only applies to the following failure reasons: IOException on the "
+                                    + "Job Manager, failures in the async phase on the Task Managers and checkpoint expiration due to a timeout. Failures "
+                                    + "originating from the sync phase on the Task Managers are always forcing failover of an affected task. Other types of "
+                                    + "checkpoint failures (such as checkpoint being subsumed) are being ignored.");
 
     public static final ConfigOption<CheckpointConfig.ExternalizedCheckpointCleanup>
             EXTERNALIZED_CHECKPOINT =
                     ConfigOptions.key("execution.checkpointing.externalized-checkpoint-retention")
                             .enumType(CheckpointConfig.ExternalizedCheckpointCleanup.class)
-                            .noDefaultValue()
+                            .defaultValue(
+                                    CheckpointConfig.ExternalizedCheckpointCleanup
+                                            .NO_EXTERNALIZED_CHECKPOINTS)
                             .withDescription(
                                     Description.builder()
                                             .text(
                                                     "Externalized checkpoints write their meta data out to persistent storage and are not "
                                                             + "automatically cleaned up when the owning job fails or is suspended (terminating with job "
-                                                            + "status %s or %s. In this case, you have to manually clean up the checkpoint state, both the "
+                                                            + "status %s or %s). In this case, you have to manually clean up the checkpoint state, both the "
                                                             + "meta data and actual program state.",
                                                     TextElement.code("JobStatus#FAILED"),
                                                     TextElement.code("JobStatus#SUSPENDED"))
@@ -236,7 +241,7 @@ public class ExecutionCheckpointingOptions {
     public static final ConfigOption<Boolean> ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH =
             ConfigOptions.key("execution.checkpointing.checkpoints-after-tasks-finish.enabled")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             Description.builder()
                                     .text(

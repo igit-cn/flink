@@ -26,45 +26,60 @@ import org.apache.flink.table.types.inference.ArgumentTypeStrategy;
 import org.apache.flink.table.types.inference.CallContext;
 import org.apache.flink.table.types.inference.Signature;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.SymbolType;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /** Strategy for a symbol argument of a specific {@link TableSymbol} enum. */
 @Internal
-public class SymbolArgumentTypeStrategy implements ArgumentTypeStrategy {
+public class SymbolArgumentTypeStrategy<T extends Enum<? extends TableSymbol>>
+        implements ArgumentTypeStrategy {
 
-    private final Class<? extends Enum<? extends TableSymbol>> symbolClass;
+    private final Class<T> symbolClass;
+    private final Set<T> allowedVariants;
 
-    public SymbolArgumentTypeStrategy(Class<? extends Enum<? extends TableSymbol>> symbolClass) {
+    public SymbolArgumentTypeStrategy(Class<T> symbolClass) {
+        this(symbolClass, new HashSet<>(Arrays.asList(symbolClass.getEnumConstants())));
+    }
+
+    public SymbolArgumentTypeStrategy(Class<T> symbolClass, Set<T> allowedVariants) {
         this.symbolClass = symbolClass;
+        this.allowedVariants = allowedVariants;
     }
 
     @Override
     public Optional<DataType> inferArgumentType(
             CallContext callContext, int argumentPos, boolean throwOnFailure) {
         final DataType argumentType = callContext.getArgumentDataTypes().get(argumentPos);
-        if (argumentType.getLogicalType().getTypeRoot() != LogicalTypeRoot.SYMBOL) {
-            if (throwOnFailure) {
-                throw callContext.newValidationError(
-                        "Unsupported argument type. Expected symbol type '%s' but actual type was '%s'.",
-                        symbolClass.getSimpleName(), argumentType);
-            } else {
-                return Optional.empty();
-            }
+        if (argumentType.getLogicalType().getTypeRoot() != LogicalTypeRoot.SYMBOL
+                || !callContext.isArgumentLiteral(argumentPos)) {
+            return callContext.fail(
+                    throwOnFailure,
+                    "Unsupported argument type. Expected symbol type '%s' but actual type was '%s'.",
+                    symbolClass.getSimpleName(),
+                    argumentType);
         }
 
-        final SymbolType<?> symbolType = (SymbolType<?>) argumentType.getLogicalType();
-        if (symbolType.getSymbolClass() != symbolClass) {
-            if (throwOnFailure) {
-                throw callContext.newValidationError(
-                        "Unsupported argument symbol type. Expected symbol '%s' but actual symbol was '%s'.",
-                        symbolClass.getSimpleName(),
-                        symbolType.getDefaultConversion().getSimpleName());
-            } else {
-                return Optional.empty();
-            }
+        Optional<T> val = callContext.getArgumentValue(argumentPos, symbolClass);
+        if (!val.isPresent()) {
+            return callContext.fail(
+                    throwOnFailure,
+                    "Unsupported argument symbol type. Expected symbol '%s' but actual symbol was %s.",
+                    symbolClass.getSimpleName(),
+                    callContext
+                            .getArgumentValue(argumentPos, Enum.class)
+                            .map(e -> "'" + e.getClass().getSimpleName() + "'")
+                            .orElse("invalid"));
+        }
+        if (!this.allowedVariants.contains(val.get())) {
+            return callContext.fail(
+                    throwOnFailure,
+                    "Unsupported argument symbol variant. Expected one of the following variants %s but actual symbol was %s.",
+                    this.allowedVariants,
+                    val.get());
         }
 
         return Optional.of(argumentType);
@@ -73,7 +88,7 @@ public class SymbolArgumentTypeStrategy implements ArgumentTypeStrategy {
     @Override
     public Signature.Argument getExpectedArgument(
             FunctionDefinition functionDefinition, int argumentPos) {
-        return Signature.Argument.of(String.format("<%s>", symbolClass.getSimpleName()));
+        return Signature.Argument.ofGroup(symbolClass);
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -43,14 +43,15 @@ import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.rpc.RpcUtils;
 import org.apache.flink.runtime.rpc.TestingRpcService;
 import org.apache.flink.runtime.rpc.exceptions.RecipientUnreachableException;
+import org.apache.flink.runtime.security.token.NoOpDelegationTokenManager;
 import org.apache.flink.runtime.slots.ResourceRequirement;
 import org.apache.flink.runtime.slots.ResourceRequirements;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorMemoryConfiguration;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorThreadInfoGateway;
 import org.apache.flink.runtime.taskexecutor.TestingTaskExecutorGatewayBuilder;
-import org.apache.flink.runtime.testutils.TestingUtils;
 import org.apache.flink.runtime.util.TestingFatalErrorHandler;
+import org.apache.flink.testutils.TestingUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.concurrent.FutureUtils;
@@ -128,7 +129,7 @@ public class ResourceManagerTest extends TestLogger {
     @After
     public void after() throws Exception {
         if (resourceManager != null) {
-            RpcUtils.terminateRpcEndpoint(resourceManager, TIMEOUT);
+            RpcUtils.terminateRpcEndpoint(resourceManager);
         }
 
         if (highAvailabilityServices != null) {
@@ -147,7 +148,7 @@ public class ResourceManagerTest extends TestLogger {
     @AfterClass
     public static void tearDownClass() throws Exception {
         if (rpcService != null) {
-            RpcUtils.terminateRpcServices(TIMEOUT, rpcService);
+            RpcUtils.terminateRpcService(rpcService);
         }
     }
 
@@ -272,7 +273,7 @@ public class ResourceManagerTest extends TestLogger {
         final ResourceManagerGateway resourceManagerGateway =
                 resourceManager.getSelfGateway(ResourceManagerGateway.class);
         resourceManagerGateway
-                .registerJobManager(
+                .registerJobMaster(
                         jobMasterGateway.getFencingToken(),
                         ResourceID.generate(),
                         jobMasterGateway.getAddress(),
@@ -327,7 +328,7 @@ public class ResourceManagerTest extends TestLogger {
                 (ignore) -> {},
                 resourceManagerGateway -> {
                     final CompletableFuture<RegistrationResponse> registrationFuture =
-                            resourceManagerGateway.registerJobManager(
+                            resourceManagerGateway.registerJobMaster(
                                     jobMasterGateway.getFencingToken(),
                                     jobMasterResourceId,
                                     jobMasterGateway.getAddress(),
@@ -383,7 +384,7 @@ public class ResourceManagerTest extends TestLogger {
                 (ignore) -> {},
                 resourceManagerGateway -> {
                     final CompletableFuture<RegistrationResponse> registrationFuture =
-                            resourceManagerGateway.registerJobManager(
+                            resourceManagerGateway.registerJobMaster(
                                     jobMasterGateway.getFencingToken(),
                                     jobMasterResourceId,
                                     jobMasterGateway.getAddress(),
@@ -541,7 +542,7 @@ public class ResourceManagerTest extends TestLogger {
         final JobID jobId = JobID.generate();
         final ResourceManagerGateway resourceManagerGateway =
                 resourceManager.getSelfGateway(ResourceManagerGateway.class);
-        resourceManagerGateway.registerJobManager(
+        resourceManagerGateway.registerJobMaster(
                 jobMasterGateway.getFencingToken(),
                 ResourceID.generate(),
                 jobMasterGateway.getAddress(),
@@ -639,8 +640,7 @@ public class ResourceManagerTest extends TestLogger {
 
             if (slotManager == null) {
                 slotManager =
-                        DeclarativeSlotManagerBuilder.newBuilder()
-                                .setScheduledExecutor(rpcService.getScheduledExecutor())
+                        DeclarativeSlotManagerBuilder.newBuilder(rpcService.getScheduledExecutor())
                                 .build();
             }
 
@@ -655,6 +655,7 @@ public class ResourceManagerTest extends TestLogger {
                             resourceManagerId.toUUID(),
                             resourceManagerResourceId,
                             heartbeatServices,
+                            new NoOpDelegationTokenManager(),
                             slotManager,
                             NoOpResourceManagerPartitionTracker::get,
                             jobLeaderIdService,

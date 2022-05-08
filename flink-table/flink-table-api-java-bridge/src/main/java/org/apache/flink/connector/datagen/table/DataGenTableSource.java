@@ -24,36 +24,37 @@ import org.apache.flink.connector.datagen.table.types.RowDataGenerator;
 import org.apache.flink.streaming.api.functions.source.StatefulSequenceSource;
 import org.apache.flink.streaming.api.functions.source.datagen.DataGenerator;
 import org.apache.flink.streaming.api.functions.source.datagen.DataGeneratorSource;
-import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.SourceFunctionProvider;
+import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.sources.StreamTableSource;
+import org.apache.flink.table.types.DataType;
 
 /**
  * A {@link StreamTableSource} that emits each number from a given interval exactly once, possibly
  * in parallel. See {@link StatefulSequenceSource}.
  */
 @Internal
-public class DataGenTableSource implements ScanTableSource {
+public class DataGenTableSource implements ScanTableSource, SupportsLimitPushDown {
 
     private final DataGenerator<?>[] fieldGenerators;
     private final String tableName;
-    private final TableSchema schema;
+    private final DataType rowDataType;
     private final long rowsPerSecond;
-    private final Long numberOfRows;
+    private Long numberOfRows;
 
     public DataGenTableSource(
             DataGenerator<?>[] fieldGenerators,
             String tableName,
-            TableSchema schema,
+            DataType rowDataType,
             long rowsPerSecond,
             Long numberOfRows) {
         this.fieldGenerators = fieldGenerators;
         this.tableName = tableName;
-        this.schema = schema;
+        this.rowDataType = rowDataType;
         this.rowsPerSecond = rowsPerSecond;
         this.numberOfRows = numberOfRows;
     }
@@ -67,7 +68,7 @@ public class DataGenTableSource implements ScanTableSource {
     @VisibleForTesting
     public DataGeneratorSource<RowData> createSource() {
         return new DataGeneratorSource<>(
-                new RowDataGenerator(fieldGenerators, schema.getFieldNames()),
+                new RowDataGenerator(fieldGenerators, DataType.getFieldNames(rowDataType)),
                 rowsPerSecond,
                 numberOfRows);
     }
@@ -75,7 +76,7 @@ public class DataGenTableSource implements ScanTableSource {
     @Override
     public DynamicTableSource copy() {
         return new DataGenTableSource(
-                fieldGenerators, tableName, schema, rowsPerSecond, numberOfRows);
+                fieldGenerators, tableName, rowDataType, rowsPerSecond, numberOfRows);
     }
 
     @Override
@@ -86,5 +87,10 @@ public class DataGenTableSource implements ScanTableSource {
     @Override
     public ChangelogMode getChangelogMode() {
         return ChangelogMode.insertOnly();
+    }
+
+    @Override
+    public void applyLimit(long limit) {
+        this.numberOfRows = limit;
     }
 }

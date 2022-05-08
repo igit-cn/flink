@@ -36,8 +36,6 @@ import org.apache.flink.runtime.externalresource.ExternalResourceInfoProvider;
 import org.apache.flink.runtime.filecache.FileCache;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
-import org.apache.flink.runtime.io.network.partition.NoOpResultPartitionConsumableNotifier;
-import org.apache.flink.runtime.io.network.partition.ResultPartitionConsumableNotifier;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.jobgraph.tasks.TaskInvokable;
@@ -52,7 +50,6 @@ import org.apache.flink.runtime.taskexecutor.KvStateService;
 import org.apache.flink.runtime.taskexecutor.NoOpPartitionProducerStateChecker;
 import org.apache.flink.runtime.taskexecutor.PartitionProducerStateChecker;
 import org.apache.flink.runtime.taskexecutor.TestGlobalAggregateManager;
-import org.apache.flink.runtime.testutils.TestingUtils;
 import org.apache.flink.runtime.util.TestingTaskManagerRuntimeInfo;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SerializedValue;
@@ -72,13 +69,10 @@ public final class TestTaskBuilder {
     private TaskManagerActions taskManagerActions = new NoOpTaskManagerActions();
     private LibraryCacheManager.ClassLoaderHandle classLoaderHandle =
             TestingClassLoaderLease.newBuilder().build();
-    private ResultPartitionConsumableNotifier consumableNotifier =
-            new NoOpResultPartitionConsumableNotifier();
     private PartitionProducerStateChecker partitionProducerStateChecker =
             new NoOpPartitionProducerStateChecker();
     private final ShuffleEnvironment<?, ?> shuffleEnvironment;
     private KvStateService kvStateService = new KvStateService(new KvStateRegistry(), null, null);
-    private Executor executor = TestingUtils.defaultExecutor();
     private Configuration taskManagerConfig = new Configuration();
     private Configuration taskConfig = new Configuration();
     private ExecutionConfig executionConfig = new ExecutionConfig();
@@ -112,12 +106,6 @@ public final class TestTaskBuilder {
         return this;
     }
 
-    public TestTaskBuilder setConsumableNotifier(
-            ResultPartitionConsumableNotifier consumableNotifier) {
-        this.consumableNotifier = consumableNotifier;
-        return this;
-    }
-
     public TestTaskBuilder setPartitionProducerStateChecker(
             PartitionProducerStateChecker partitionProducerStateChecker) {
         this.partitionProducerStateChecker = partitionProducerStateChecker;
@@ -126,11 +114,6 @@ public final class TestTaskBuilder {
 
     public TestTaskBuilder setKvStateService(KvStateService kvStateService) {
         this.kvStateService = kvStateService;
-        return this;
-    }
-
-    public TestTaskBuilder setExecutor(Executor executor) {
-        this.executor = executor;
         return this;
     }
 
@@ -192,7 +175,7 @@ public final class TestTaskBuilder {
         return this;
     }
 
-    public Task build() throws Exception {
+    public Task build(Executor executor) throws Exception {
         final JobVertexID jobVertexId = new JobVertexID();
 
         final SerializedValue<ExecutionConfig> serializedExecutionConfig =
@@ -240,7 +223,6 @@ public final class TestTaskBuilder {
                 mock(FileCache.class),
                 new TestingTaskManagerRuntimeInfo(taskManagerConfig),
                 taskMetricGroup,
-                consumableNotifier,
                 partitionProducerStateChecker,
                 executor);
     }

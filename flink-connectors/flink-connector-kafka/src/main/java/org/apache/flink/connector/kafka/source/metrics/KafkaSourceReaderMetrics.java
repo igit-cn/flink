@@ -18,6 +18,7 @@
 
 package org.apache.flink.connector.kafka.source.metrics;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.connector.kafka.MetricUtil;
 import org.apache.flink.connector.kafka.source.reader.KafkaSourceReader;
 import org.apache.flink.metrics.Counter;
@@ -62,6 +63,7 @@ import java.util.function.Predicate;
  * can be found at:
  * {some_parent_groups}.operator.KafkaSourceReader.KafkaConsumer.records-consumed-total"
  */
+@PublicEvolving
 public class KafkaSourceReaderMetrics {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSourceReaderMetrics.class);
@@ -289,6 +291,8 @@ public class KafkaSourceReaderMetrics {
     private @Nullable Metric getRecordsLagMetric(
             Map<MetricName, ? extends Metric> metrics, TopicPartition tp) {
         try {
+            final String resolvedTopic = tp.topic().replace('.', '_');
+            final String resolvedPartition = String.valueOf(tp.partition());
             Predicate<Map.Entry<MetricName, ? extends Metric>> filter =
                     entry -> {
                         final MetricName metricName = entry.getKey();
@@ -297,9 +301,9 @@ public class KafkaSourceReaderMetrics {
                         return metricName.group().equals(CONSUMER_FETCH_MANAGER_GROUP)
                                 && metricName.name().equals(RECORDS_LAG)
                                 && tags.containsKey("topic")
-                                && tags.get("topic").equals(tp.topic())
+                                && tags.get("topic").equals(resolvedTopic)
                                 && tags.containsKey("partition")
-                                && tags.get("partition").equals(String.valueOf(tp.partition()));
+                                && tags.get("partition").equals(resolvedPartition);
                     };
             return MetricUtil.getKafkaMetric(metrics, filter);
         } catch (IllegalStateException e) {
@@ -308,7 +312,7 @@ public class KafkaSourceReaderMetrics {
                             "Error when getting Kafka consumer metric \"%s\" "
                                     + "for partition \"%s\". "
                                     + "Metric \"%s\" may not be reported correctly. ",
-                            RECORDS_LAG, tp, MetricNames.PENDING_BYTES),
+                            RECORDS_LAG, tp, MetricNames.PENDING_RECORDS),
                     e);
             return null;
         }

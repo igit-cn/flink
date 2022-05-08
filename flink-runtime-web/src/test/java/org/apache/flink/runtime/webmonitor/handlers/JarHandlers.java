@@ -25,7 +25,6 @@ import org.apache.flink.runtime.rest.handler.HandlerRequest;
 import org.apache.flink.runtime.rest.messages.EmptyMessageParameters;
 import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
 import org.apache.flink.runtime.rest.messages.JobPlanInfo;
-import org.apache.flink.runtime.testutils.TestingUtils;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.TestingDispatcherGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
@@ -45,12 +44,14 @@ public class JarHandlers {
     final JarRunHandler runHandler;
     final JarDeleteHandler deleteHandler;
 
-    JarHandlers(final Path jarDir, final TestingDispatcherGateway restfulGateway) {
+    JarHandlers(
+            final Path jarDir,
+            final TestingDispatcherGateway restfulGateway,
+            final Executor executor) {
         final GatewayRetriever<TestingDispatcherGateway> gatewayRetriever =
                 () -> CompletableFuture.completedFuture(restfulGateway);
         final Time timeout = Time.seconds(10);
         final Map<String, String> responseHeaders = Collections.emptyMap();
-        final Executor executor = TestingUtils.defaultExecutor();
 
         uploadHandler =
                 new JarUploadHandler(

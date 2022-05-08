@@ -98,7 +98,7 @@ public class LocalStateForwardingTest extends TestLogger {
                         0,
                         taskStateManager);
 
-        StreamTask testStreamTask = new StreamTaskTest.NoOpStreamTask(streamMockEnvironment);
+        StreamTask testStreamTask = new StreamTaskITCase.NoOpStreamTask(streamMockEnvironment);
         CheckpointMetaData checkpointMetaData = new CheckpointMetaData(0L, 0L);
         CheckpointMetricsBuilder checkpointMetrics = new CheckpointMetricsBuilder();
 
@@ -221,7 +221,7 @@ public class LocalStateForwardingTest extends TestLogger {
                 new LocalRecoveryDirectoryProviderImpl(
                         temporaryFolder.newFolder(), jobID, jobVertexID, subtaskIdx);
 
-        LocalRecoveryConfig localRecoveryConfig = new LocalRecoveryConfig(true, directoryProvider);
+        LocalRecoveryConfig localRecoveryConfig = new LocalRecoveryConfig(directoryProvider);
 
         TaskLocalStateStore taskLocalStateStore =
                 new TaskLocalStateStoreImpl(

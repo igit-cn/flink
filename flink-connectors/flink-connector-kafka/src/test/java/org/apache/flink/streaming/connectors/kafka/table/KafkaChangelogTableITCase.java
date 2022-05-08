@@ -20,14 +20,16 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
+import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.config.OptimizerConfigOptions;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.Before;
@@ -58,11 +60,12 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
         createTestTopic(topic, 1, 1);
 
         // enables MiniBatch processing to verify MiniBatch + FLIP-95, see FLINK-18769
-        Configuration tableConf = tEnv.getConfig().getConfiguration();
-        tableConf.setString("table.exec.mini-batch.enabled", "true");
-        tableConf.setString("table.exec.mini-batch.allow-latency", "1s");
-        tableConf.setString("table.exec.mini-batch.size", "5000");
-        tableConf.setString("table.optimizer.agg-phase-strategy", "TWO_PHASE");
+        TableConfig tableConf = tEnv.getConfig();
+        tableConf.set(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED, true);
+        tableConf.set(
+                ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ALLOW_LATENCY, Duration.ofSeconds(1));
+        tableConf.set(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_SIZE, 5000L);
+        tableConf.set(OptimizerConfigOptions.TABLE_OPTIMIZER_AGG_PHASE_STRATEGY, "TWO_PHASE");
 
         // ---------- Write the Debezium json into Kafka -------------------
         List<String> lines = readLines("debezium-data-schema-exclude.txt");
@@ -186,11 +189,12 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
         // configure time zone of  the Canal Json metadata "ingestion-timestamp"
         tEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
         // enables MiniBatch processing to verify MiniBatch + FLIP-95, see FLINK-18769
-        Configuration tableConf = tEnv.getConfig().getConfiguration();
-        tableConf.setString("table.exec.mini-batch.enabled", "true");
-        tableConf.setString("table.exec.mini-batch.allow-latency", "1s");
-        tableConf.setString("table.exec.mini-batch.size", "5000");
-        tableConf.setString("table.optimizer.agg-phase-strategy", "TWO_PHASE");
+        TableConfig tableConf = tEnv.getConfig();
+        tableConf.set(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED, true);
+        tableConf.set(
+                ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ALLOW_LATENCY, Duration.ofSeconds(1));
+        tableConf.set(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_SIZE, 5000L);
+        tableConf.set(OptimizerConfigOptions.TABLE_OPTIMIZER_AGG_PHASE_STRATEGY, "TWO_PHASE");
 
         // ---------- Write the Canal json into Kafka -------------------
         List<String> lines = readLines("canal-data.txt");
@@ -302,10 +306,12 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
 
         List<String> expected =
                 Arrays.asList(
+                        "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:38:35.477, 2020-05-13T12:38:35, 12-pack drill bits]",
                         "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:38:35.477, 2020-05-13T12:38:35, spare tire]",
                         "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:39:06.301, 2020-05-13T12:39:06, hammer]",
                         "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:39:09.489, 2020-05-13T12:39:09, rocks]",
                         "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:39:18.230, 2020-05-13T12:39:18, jacket]",
+                        "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:42:33.939, 2020-05-13T12:42:33, car battery]",
                         "+I[changelog_canal, inventory, products2, {name=12, weight=7, description=12, id=4}, [id], 2020-05-13T12:42:33.939, 2020-05-13T12:42:33, scooter]");
 
         waitingExpectedResults("sink", expected, Duration.ofSeconds(10));
@@ -324,11 +330,12 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
         // configure time zone of  the Maxwell Json metadata "ingestion-timestamp"
         tEnv.getConfig().setLocalTimeZone(ZoneId.of("UTC"));
         // enables MiniBatch processing to verify MiniBatch + FLIP-95, see FLINK-18769
-        Configuration tableConf = tEnv.getConfig().getConfiguration();
-        tableConf.setString("table.exec.mini-batch.enabled", "true");
-        tableConf.setString("table.exec.mini-batch.allow-latency", "1s");
-        tableConf.setString("table.exec.mini-batch.size", "5000");
-        tableConf.setString("table.optimizer.agg-phase-strategy", "TWO_PHASE");
+        TableConfig tableConf = tEnv.getConfig();
+        tableConf.set(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED, true);
+        tableConf.set(
+                ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ALLOW_LATENCY, Duration.ofSeconds(1));
+        tableConf.set(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_SIZE, 5000L);
+        tableConf.set(OptimizerConfigOptions.TABLE_OPTIMIZER_AGG_PHASE_STRATEGY, "TWO_PHASE");
 
         // ---------- Write the Maxwell json into Kafka -------------------
         List<String> lines = readLines("maxwell-data.txt");
@@ -435,10 +442,12 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
 
         List<String> expected =
                 Arrays.asList(
+                        "+I[changelog_maxwell, test, product, null, 2020-08-06T03:34:43, 12-pack drill bits]",
                         "+I[changelog_maxwell, test, product, null, 2020-08-06T03:34:43, spare tire]",
                         "+I[changelog_maxwell, test, product, null, 2020-08-06T03:34:53, hammer]",
                         "+I[changelog_maxwell, test, product, null, 2020-08-06T03:34:57, rocks]",
                         "+I[changelog_maxwell, test, product, null, 2020-08-06T03:35:06, jacket]",
+                        "+I[changelog_maxwell, test, product, null, 2020-08-06T03:35:28, car battery]",
                         "+I[changelog_maxwell, test, product, null, 2020-08-06T03:35:28, scooter]");
 
         waitingExpectedResults("sink", expected, Duration.ofSeconds(10));

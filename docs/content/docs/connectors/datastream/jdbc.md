@@ -30,9 +30,9 @@ This connector provides a sink that writes data to a JDBC database.
 
 To use it, add the following dependency to your project (along with your JDBC driver):
 
-{{< artifact flink-connector-jdbc withScalaVersion >}}
+{{< artifact flink-connector-jdbc >}}
 
-Note that the streaming connectors are currently __NOT__ part of the binary distribution. See how to link with them for cluster execution [here]({{< ref "docs/dev/datastream/project-configuration" >}}).
+Note that the streaming connectors are currently __NOT__ part of the binary distribution. See how to link with them for cluster execution [here]({{< ref "docs/dev/configuration/overview" >}}).
 A driver dependency is also required to connect to a specified database. Please consult your database documentation on how to add the corresponding driver.
 
 ## `JdbcSink.sink`
@@ -73,7 +73,7 @@ JdbcExecutionOptions.builder()
         .withBatchIntervalMs(200)             // optional: default = 0, meaning no time-based execution is done
         .withBatchSize(1000)                  // optional: default = 5000 values
         .withMaxRetries(5)                    // optional: default = 3 
-.build()
+.build();
 ```
 
 A JDBC batch is executed as soon as one of the following conditions is true:
@@ -184,7 +184,7 @@ In such cases, please use the following API to construct `JdbcExactlyOnceOptions
 ```java
 JdbcExactlyOnceOptions.builder()
 .withTransactionPerConnection(true)
-.build()
+.build();
 ```
 This will make Flink use a separate connection for every XA transaction. This may require adjusting connection limits.
 For PostgreSQL and MySQL, this can be done by increasing `max_connections`.

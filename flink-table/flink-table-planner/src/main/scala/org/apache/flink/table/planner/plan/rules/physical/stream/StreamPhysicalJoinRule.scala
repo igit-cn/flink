@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.flink.table.planner.plan.rules.physical.stream
 
 import org.apache.flink.table.api.TableException
@@ -33,18 +32,17 @@ import org.apache.calcite.rel.RelNode
 import scala.collection.JavaConversions._
 
 /**
-  * Rule that converts [[FlinkLogicalJoin]] without window bounds in join condition
-  * to [[StreamPhysicalJoin]].
-  */
-class StreamPhysicalJoinRule
-  extends StreamPhysicalJoinRuleBase("StreamPhysicalJoinRule") {
+ * Rule that converts [[FlinkLogicalJoin]] without window bounds in join condition to
+ * [[StreamPhysicalJoin]].
+ */
+class StreamPhysicalJoinRule extends StreamPhysicalJoinRuleBase("StreamPhysicalJoinRule") {
 
   override def matches(call: RelOptRuleCall): Boolean = {
     val join: FlinkLogicalJoin = call.rel(0)
     val left: FlinkLogicalRel = call.rel(1).asInstanceOf[FlinkLogicalRel]
     val right: FlinkLogicalRel = call.rel(2).asInstanceOf[FlinkLogicalRel]
 
-    if (!satisfyRegularJoin(join, right)) {
+    if (!satisfyRegularJoin(join, left, right)) {
       return false
     }
 
@@ -64,8 +62,8 @@ class StreamPhysicalJoinRule
     checkState(!timeAttrInOutput)
 
     // Join condition must not access time attributes
-    val remainingPredsAccessTime = accessesTimeAttribute(
-      join.getCondition, combineJoinInputsRowType(join))
+    val remainingPredsAccessTime =
+      accessesTimeAttribute(join.getCondition, combineJoinInputsRowType(join))
     checkState(!remainingPredsAccessTime)
     true
   }

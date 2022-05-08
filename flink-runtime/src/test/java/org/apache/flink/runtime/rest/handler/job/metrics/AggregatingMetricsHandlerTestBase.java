@@ -31,10 +31,10 @@ import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
 import org.apache.flink.runtime.rest.messages.job.metrics.AbstractAggregatedMetricsParameters;
 import org.apache.flink.runtime.rest.messages.job.metrics.AggregatedMetric;
 import org.apache.flink.runtime.rest.messages.job.metrics.AggregatedMetricsResponseBody;
-import org.apache.flink.runtime.testutils.TestingUtils;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 import org.apache.flink.runtime.webmonitor.retriever.MetricQueryServiceRetriever;
+import org.apache.flink.testutils.TestingUtils;
 import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.concurrent.Executors;
 
@@ -67,7 +67,6 @@ public abstract class AggregatingMetricsHandlerTestBase<
     private static final GatewayRetriever<DispatcherGateway> LEADER_RETRIEVER;
     private static final Time TIMEOUT = Time.milliseconds(50);
     private static final Map<String, String> TEST_HEADERS = Collections.emptyMap();
-    private static final Executor EXECUTOR = TestingUtils.defaultExecutor();
 
     static {
         TEST_REST_ADDRESS = CompletableFuture.completedFuture("localhost:12345");
@@ -103,7 +102,13 @@ public abstract class AggregatingMetricsHandlerTestBase<
             store.add(dump);
         }
 
-        handler = getHandler(LEADER_RETRIEVER, TIMEOUT, TEST_HEADERS, EXECUTOR, fetcher);
+        handler =
+                getHandler(
+                        LEADER_RETRIEVER,
+                        TIMEOUT,
+                        TEST_HEADERS,
+                        Executors.directExecutor(),
+                        fetcher);
         pathParameters = getPathParameters();
     }
 

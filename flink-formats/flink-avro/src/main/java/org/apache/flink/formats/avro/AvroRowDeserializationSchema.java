@@ -19,6 +19,7 @@ package org.apache.flink.formats.avro;
 
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.AbstractDeserializationSchema;
+import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
@@ -76,8 +77,13 @@ import java.util.TimeZone;
  *
  * <p>Note: Changes in this class need to be kept in sync with the corresponding runtime class
  * {@link AvroRowSerializationSchema} and schema converter {@link AvroSchemaConverter}.
+ *
+ * @deprecated The format was developed for the Table API users and will not be maintained for
+ *     DataStream API users anymore. Either use Table API or switch to Data Stream, defining your
+ *     own {@link DeserializationSchema}.
  */
 @PublicEvolving
+@Deprecated
 public class AvroRowDeserializationSchema extends AbstractDeserializationSchema<Row> {
     /** Used for time conversions into SQL types. */
     private static final TimeZone LOCAL_TZ = TimeZone.getDefault();
@@ -343,6 +349,11 @@ public class AvroRowDeserializationSchema extends AbstractDeserializationSchema<
                 long seconds = micros / MICROS_PER_SECOND - offsetMillis / 1000;
                 int nanos =
                         ((int) (micros % MICROS_PER_SECOND)) * 1000 - offsetMillis % 1000 * 1000;
+                if (nanos < 0) {
+                    // can't set negative nanos on timestamp
+                    seconds--;
+                    nanos = (int) (MICROS_PER_SECOND * 1000 + nanos);
+                }
                 Timestamp timestamp = new Timestamp(seconds * 1000L);
                 timestamp.setNanos(nanos);
                 return timestamp;

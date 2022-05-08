@@ -15,26 +15,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.flink.table.api
 
-import com.google.common.collect.Lists
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment
-import org.apache.flink.table.api.internal.TableEnvironmentImpl
 import org.apache.flink.types.Row
 import org.apache.flink.util.{CollectionUtil, TestLogger}
-import org.junit.rules.{ExpectedException, TemporaryFolder}
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
-import org.junit.{Assert, Before, Rule, Test}
 
 import _root_.java.lang.{Boolean => JBoolean}
 import _root_.java.util
+import com.google.common.collect.Lists
+import org.junit.{Assert, Rule, Test}
+import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
 
-/**
- * Test SQL statements which executed by [[TableEnvironment#executeSql()]]
- */
+/** Test SQL statements which executed by [[TableEnvironment#executeSql()]] */
 @RunWith(classOf[Parameterized])
 class ExecuteSqlTest(isStreaming: Boolean) extends TestLogger {
 
@@ -81,13 +75,12 @@ class ExecuteSqlTest(isStreaming: Boolean) extends TestLogger {
          |)""".stripMargin
     if (!isStreaming) {
       val sinkPath = _tempFolder.newFolder().toString
-      createWithClause =
-        s"""
-           |with (
-           |  'connector' = 'filesystem',
-           |  'path' = '$sinkPath',
-           |  'format' = 'testcsv'
-           |)""".stripMargin
+      createWithClause = s"""
+                            |with (
+                            |  'connector' = 'filesystem',
+                            |  'path' = '$sinkPath',
+                            |  'format' = 'testcsv'
+                            |)""".stripMargin
     }
     tEnv.executeSql(createClause + createWithClause)
     tEnv.executeSql("create view orders_view as select * from orders")
@@ -98,7 +91,8 @@ class ExecuteSqlTest(isStreaming: Boolean) extends TestLogger {
     val expectedResultRows: util.List[Row] = Lists.newArrayList(
       Row.of("user", "BIGINT", new JBoolean(false), "PRI(user)", null, null),
       Row.of("product", "VARCHAR(32)", new JBoolean(true), null, null, null),
-      Row.of("amount", "INT", new JBoolean(true), null, null, null))
+      Row.of("amount", "INT", new JBoolean(true), null, null, null)
+    )
     val resultsWithFrom: util.List[Row] = CollectionUtil.iteratorToList(
       tEnv
         .executeSql("show columns from orders")
@@ -134,8 +128,8 @@ class ExecuteSqlTest(isStreaming: Boolean) extends TestLogger {
 
   private def showColumnsWithNotLikeClauseFromTable(): Unit = {
 
-    val expectedResultRows: util.List[Row] = Lists.newArrayList(
-      Row.of("amount", "INT", new JBoolean(true), null, null, null))
+    val expectedResultRows: util.List[Row] =
+      Lists.newArrayList(Row.of("amount", "INT", new JBoolean(true), null, null, null))
     val resultsWithFrom: util.List[Row] = CollectionUtil.iteratorToList(
       tEnv
         .executeSql("show columns from orders not like '%_r%'")
@@ -155,15 +149,16 @@ class ExecuteSqlTest(isStreaming: Boolean) extends TestLogger {
     val expectedResultRows: util.List[Row] = Lists.newArrayList(
       Row.of("user", "BIGINT", new JBoolean(false), null, null, null),
       Row.of("product", "VARCHAR(32)", new JBoolean(true), null, null, null),
-      Row.of("amount", "INT", new JBoolean(true), null, null, null))
+      Row.of("amount", "INT", new JBoolean(true), null, null, null)
+    )
     val resultsWithFrom: util.List[Row] = CollectionUtil.iteratorToList(
       tEnv
         .executeSql("show columns from orders_view")
         .collect()
     )
     val resultsWithIn: util.List[Row] = CollectionUtil.iteratorToList(
-      tEnv.
-        executeSql("show columns in orders_view")
+      tEnv
+        .executeSql("show columns in orders_view")
         .collect()
     )
     Assert.assertEquals(expectedResultRows, resultsWithFrom)
@@ -191,8 +186,8 @@ class ExecuteSqlTest(isStreaming: Boolean) extends TestLogger {
 
   private def showColumnsWithNotLikeClauseFromView(): Unit = {
 
-    val expectedResultRows: util.List[Row] = Lists.newArrayList(
-      Row.of("amount", "INT", new JBoolean(true), null, null, null))
+    val expectedResultRows: util.List[Row] =
+      Lists.newArrayList(Row.of("amount", "INT", new JBoolean(true), null, null, null))
     val resultsWithFrom: util.List[Row] = CollectionUtil.iteratorToList(
       tEnv
         .executeSql("show columns from orders_view not like '%_r%'")

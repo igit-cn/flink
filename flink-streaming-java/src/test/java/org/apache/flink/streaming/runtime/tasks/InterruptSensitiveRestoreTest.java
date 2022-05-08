@@ -43,7 +43,6 @@ import org.apache.flink.runtime.filecache.FileCache;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.network.NettyShuffleEnvironmentBuilder;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
-import org.apache.flink.runtime.io.network.partition.NoOpResultPartitionConsumableNotifier;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.tasks.InputSplitProvider;
@@ -62,6 +61,7 @@ import org.apache.flink.runtime.state.OperatorStateHandle;
 import org.apache.flink.runtime.state.OperatorStreamStateHandle;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StreamStateHandle;
+import org.apache.flink.runtime.state.TestStreamStateHandle;
 import org.apache.flink.runtime.state.TestTaskStateManager;
 import org.apache.flink.runtime.taskexecutor.KvStateService;
 import org.apache.flink.runtime.taskexecutor.PartitionProducerStateChecker;
@@ -291,7 +291,6 @@ public class InterruptSensitiveRestoreTest {
                         VoidPermanentBlobService.INSTANCE),
                 new TestingTaskManagerRuntimeInfo(),
                 UnregisteredMetricGroups.createUnregisteredTaskMetricGroup(),
-                new NoOpResultPartitionConsumableNotifier(),
                 mock(PartitionProducerStateChecker.class),
                 mock(Executor.class));
     }
@@ -299,7 +298,7 @@ public class InterruptSensitiveRestoreTest {
     // ------------------------------------------------------------------------
 
     @SuppressWarnings("serial")
-    private static class InterruptLockingStateHandle implements StreamStateHandle {
+    private static class InterruptLockingStateHandle implements TestStreamStateHandle {
 
         private static final long serialVersionUID = 1L;
 

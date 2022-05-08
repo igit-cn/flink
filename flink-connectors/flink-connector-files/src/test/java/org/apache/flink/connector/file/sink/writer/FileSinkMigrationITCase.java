@@ -23,10 +23,9 @@ import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.connector.file.sink.FileSink;
 import org.apache.flink.connector.file.sink.utils.IntegerFileSinkTestDataUtils;
+import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
@@ -114,13 +113,11 @@ public class FileSinkMigrationITCase extends TestLogger {
         String outputPath = TEMPORARY_FOLDER.newFolder().getAbsolutePath();
         String savepointBasePath = TEMPORARY_FOLDER.newFolder().getAbsolutePath();
 
-        final Configuration config = new Configuration();
-        config.setString(RestOptions.BIND_PORT, "18081-19000");
         final MiniClusterConfiguration cfg =
                 new MiniClusterConfiguration.Builder()
+                        .withRandomPorts()
                         .setNumTaskManagers(1)
                         .setNumSlotsPerTaskManager(4)
-                        .setConfiguration(config)
                         .build();
 
         JobGraph streamingFileSinkJobGraph = createStreamingFileSinkJobGraph(outputPath);
@@ -188,7 +185,8 @@ public class FileSinkMigrationITCase extends TestLogger {
             waitForAllTaskRunning(miniCluster, jobId, false);
 
             CompletableFuture<String> savepointResultFuture =
-                    miniCluster.triggerSavepoint(jobId, savepointBasePath, true);
+                    miniCluster.triggerSavepoint(
+                            jobId, savepointBasePath, true, SavepointFormatType.CANONICAL);
             return savepointResultFuture.get();
         }
     }
