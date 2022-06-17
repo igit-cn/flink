@@ -470,6 +470,16 @@ input
     .<windowed transformation>(<window function>)
 ```
 {{< /tab >}}
+{{< tab "Python" >}}
+```python
+input = ...  # type: DataStream
+
+input \
+    .key_by(<key selector>) \
+    .window(GlobalWindows.create()) \
+    .<windowed transformation>(<window function>)
+```
+{{< /tab >}}
 {{< /tabs >}}
 
 ## 窗口函数（Window Functions）
@@ -1592,6 +1602,20 @@ val resultsPerKey = input
 val globalResults = resultsPerKey
     .windowAll(TumblingEventTimeWindows.of(Time.seconds(5)))
     .process(new TopKWindowFunction())
+```
+{{< /tab >}}
+{{< tab "Python" >}}
+```python
+input = ...  # type: DataStream
+
+results_per_key = input \
+    .key_by(<key selector>) \
+    .window(TumblingEventTimeWindows.of(Time.seconds(5))) \
+    .reduce(Summer())
+
+global_results = results_per_key \
+    .window_all(TumblingProcessingTimeWindows.of(Time.seconds(5))) \
+    .process(TopKWindowFunction())
 ```
 {{< /tab >}}
 {{< /tabs >}}

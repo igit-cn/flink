@@ -546,23 +546,29 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
     @Override
     public CompletableFuture<TaskThreadInfoResponse> requestThreadInfoSamples(
-            final ExecutionAttemptID taskExecutionAttemptId,
+            final Collection<ExecutionAttemptID> taskExecutionAttemptIds,
             final ThreadInfoSamplesRequest requestParams,
             final Time timeout) {
 
-        final Task task = taskSlotTable.getTask(taskExecutionAttemptId);
-        if (task == null) {
-            return FutureUtils.completedExceptionally(
-                    new IllegalStateException(
-                            String.format(
-                                    "Cannot sample task %s. "
-                                            + "Task is not known to the task manager.",
-                                    taskExecutionAttemptId)));
+        final Collection<Task> tasks = new ArrayList<>();
+        for (ExecutionAttemptID executionAttemptId : taskExecutionAttemptIds) {
+            final Task task = taskSlotTable.getTask(executionAttemptId);
+            if (task == null) {
+                log.warn(
+                        String.format(
+                                "Cannot sample task %s. "
+                                        + "Task is not known to the task manager.",
+                                executionAttemptId));
+            } else {
+                tasks.add(task);
+            }
         }
 
-        final CompletableFuture<List<ThreadInfoSample>> stackTracesFuture =
-                threadInfoSampleService.requestThreadInfoSamples(
-                        SampleableTaskAdapter.fromTask(task), requestParams);
+        Collection<SampleableTask> sampleableTasks =
+                tasks.stream().map(SampleableTaskAdapter::fromTask).collect(Collectors.toList());
+
+        final CompletableFuture<Collection<ThreadInfoSample>> stackTracesFuture =
+                threadInfoSampleService.requestThreadInfoSamples(sampleableTasks, requestParams);
 
         return stackTracesFuture.thenApply(TaskThreadInfoResponse::new);
     }
@@ -655,12 +661,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
             // note that a pre-existing job group can NOT be closed concurrently - this is done by
             // the same TM thread in removeJobMetricsGroup
             TaskMetricGroup taskMetricGroup =
-                    jobGroup.addTask(
-                            taskInformation.getJobVertexId(),
-                            tdd.getExecutionAttemptId(),
-                            taskInformation.getTaskName(),
-                            tdd.getSubtaskIndex(),
-                            tdd.getAttemptNumber());
+                    jobGroup.addTask(tdd.getExecutionAttemptId(), taskInformation.getTaskName());
 
             InputSplitProvider inputSplitProvider =
                     new RpcInputSplitProvider(
@@ -726,8 +727,6 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                             taskInformation,
                             tdd.getExecutionAttemptId(),
                             tdd.getAllocationId(),
-                            tdd.getSubtaskIndex(),
-                            tdd.getAttemptNumber(),
                             tdd.getProducedPartitions(),
                             tdd.getInputGates(),
                             memoryManager,
@@ -823,8 +822,8 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
     private Stream<ResultPartitionDeploymentDescriptor> filterPartitionsRequiringRelease(
             Collection<ResultPartitionDeploymentDescriptor> producedResultPartitions) {
         return producedResultPartitions.stream()
-                // only blocking partitions require explicit release call
-                .filter(d -> d.getPartitionType().isBlocking())
+                // only releaseByScheduler partitions require explicit release call
+                .filter(d -> d.getPartitionType().isReleaseByScheduler())
                 // partitions without local resources don't store anything on the TaskExecutor
                 .filter(d -> d.getShuffleDescriptor().storesLocalResourcesOn().isPresent());
     }

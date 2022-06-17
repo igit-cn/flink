@@ -83,6 +83,8 @@ Classes to define window:
       A grouping of elements according to a time interval from start (inclusive) to end (exclusive).
     - :class:`CountWindow`:
       A grouping of elements according to element count from start (inclusive) to end (exclusive).
+    - :class:`GlobalWindow`:
+      The window into which all data is placed.
     - :class:`WindowAssigner`:
       Assigns zero or more :class:`Window` to an element.
     - :class:`MergingWindowAssigner`:
@@ -139,6 +141,11 @@ Classes for state operations:
     - :class:`state.AggregatingState`:
       Interface for aggregating state, based on an :class:`AggregateFunction`. Elements that are
       added to this type of state will be eagerly pre-aggregated using a given AggregateFunction.
+    - :class:`state.BroadcastState`:
+      A type of state that can be created to store the state of a :class:`BroadcastStream`. This
+      state assumes that the same elements are sent to all instances of an operator.
+    - :class:`state.ReadOnlyBroadcastState`:
+      A read-only view of the :class:`BroadcastState`.
     - :class:`state.StateTtlConfig`:
       Configuration of state TTL logic.
 
@@ -163,6 +170,10 @@ Classes to define source & sink:
     - :class:`connectors.StreamingFileSink`:
       Sink that emits its input elements to files within buckets. This is integrated with the
       checkpointing mechanism to provide exactly once semantics.
+    - :class:`connectors.PulsarSource`:
+      A streaming data source that pulls a parallel data stream from Pulsar.
+    - :class:`connectors.PulsarSink`:
+      A streaming data sink to produce data into Pulsar.
     - :class:`connectors.RMQSource`:
       A streaming data source that pulls a parallel data stream from RabbitMQ.
     - :class:`connectors.RMQSink`:
@@ -211,7 +222,7 @@ from pyflink.datastream.time_domain import TimeDomain
 from pyflink.datastream.functions import ProcessFunction
 from pyflink.datastream.timerservice import TimerService
 from pyflink.datastream.window import Window, TimeWindow, CountWindow, WindowAssigner, \
-    MergingWindowAssigner, TriggerResult, Trigger
+    MergingWindowAssigner, TriggerResult, Trigger, GlobalWindow
 from pyflink.datastream.output_tag import OutputTag
 
 __all__ = [
@@ -255,6 +266,7 @@ __all__ = [
     'Window',
     'TimeWindow',
     'CountWindow',
+    'GlobalWindow',
     'WindowAssigner',
     'MergingWindowAssigner',
     'TriggerResult',

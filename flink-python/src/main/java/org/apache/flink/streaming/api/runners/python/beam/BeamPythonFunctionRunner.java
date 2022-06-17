@@ -34,7 +34,9 @@ import org.apache.flink.python.metric.FlinkMetricContainer;
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.runtime.memory.OpaqueMemoryResource;
 import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.OperatorStateBackend;
 import org.apache.flink.streaming.api.operators.python.timer.TimerRegistration;
+import org.apache.flink.streaming.api.runners.python.beam.state.BeamStateRequestHandler;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.LongFunctionWithException;
 
@@ -69,7 +71,7 @@ import org.apache.beam.sdk.options.PortablePipelineOptions;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.util.WindowedValue;
-import org.apache.beam.vendor.grpc.v1p26p0.com.google.protobuf.Struct;
+import org.apache.beam.vendor.grpc.v1p43p2.com.google.protobuf.Struct;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -119,6 +121,8 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
     @Nullable private final FlinkMetricContainer flinkMetricContainer;
 
     @Nullable private final KeyedStateBackend<?> keyedStateBackend;
+
+    @Nullable private final OperatorStateBackend operatorStateBackend;
 
     @Nullable private final TypeSerializer<?> keySerializer;
 
@@ -187,6 +191,7 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
             ProcessPythonEnvironmentManager environmentManager,
             @Nullable FlinkMetricContainer flinkMetricContainer,
             @Nullable KeyedStateBackend<?> keyedStateBackend,
+            @Nullable OperatorStateBackend operatorStateBackend,
             @Nullable TypeSerializer<?> keySerializer,
             @Nullable TypeSerializer<?> namespaceSerializer,
             @Nullable TimerRegistration timerRegistration,
@@ -199,6 +204,7 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
         this.environmentManager = Preconditions.checkNotNull(environmentManager);
         this.flinkMetricContainer = flinkMetricContainer;
         this.keyedStateBackend = keyedStateBackend;
+        this.operatorStateBackend = operatorStateBackend;
         this.keySerializer = keySerializer;
         this.namespaceSerializer = namespaceSerializer;
         this.timerRegistration = timerRegistration;
@@ -219,7 +225,11 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
 
         stateRequestHandler =
                 getStateRequestHandler(
-                        keyedStateBackend, keySerializer, namespaceSerializer, config);
+                        keyedStateBackend,
+                        operatorStateBackend,
+                        keySerializer,
+                        namespaceSerializer,
+                        config);
 
         // The creation of stageBundleFactory depends on the initialized environment manager.
         environmentManager.open();
@@ -532,7 +542,7 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
                 RunnerApi.ExecutableStagePayload.WireCoderSetting.newBuilder()
                         .setUrn(getUrn(RunnerApi.StandardCoders.Enum.PARAM_WINDOWED_VALUE))
                         .setPayload(
-                                org.apache.beam.vendor.grpc.v1p26p0.com.google.protobuf.ByteString
+                                org.apache.beam.vendor.grpc.v1p43p2.com.google.protobuf.ByteString
                                         .copyFrom(baos.toByteArray()))
                         .setInputOrOutputId(INPUT_COLLECTION_ID)
                         .build());
@@ -540,7 +550,7 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
                 RunnerApi.ExecutableStagePayload.WireCoderSetting.newBuilder()
                         .setUrn(getUrn(RunnerApi.StandardCoders.Enum.PARAM_WINDOWED_VALUE))
                         .setPayload(
-                                org.apache.beam.vendor.grpc.v1p26p0.com.google.protobuf.ByteString
+                                org.apache.beam.vendor.grpc.v1p43p2.com.google.protobuf.ByteString
                                         .copyFrom(baos.toByteArray()))
                         .setInputOrOutputId(OUTPUT_COLLECTION_ID)
                         .build());
@@ -550,7 +560,7 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
                     RunnerApi.ExecutableStagePayload.WireCoderSetting.newBuilder()
                             .setUrn(getUrn(RunnerApi.StandardCoders.Enum.PARAM_WINDOWED_VALUE))
                             .setPayload(
-                                    org.apache.beam.vendor.grpc.v1p26p0.com.google.protobuf
+                                    org.apache.beam.vendor.grpc.v1p43p2.com.google.protobuf
                                             .ByteString.copyFrom(baos.toByteArray()))
                             .setInputOrOutputId(entry.getKey())
                             .build());
@@ -641,16 +651,16 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
     }
 
     private static StateRequestHandler getStateRequestHandler(
-            KeyedStateBackend<?> keyedStateBackend,
-            TypeSerializer<?> keySerializer,
-            TypeSerializer<?> namespaceSerializer,
+            @Nullable KeyedStateBackend<?> keyedStateBackend,
+            @Nullable OperatorStateBackend operatorStateBackend,
+            @Nullable TypeSerializer<?> keySerializer,
+            @Nullable TypeSerializer<?> namespaceSerializer,
             ReadableConfig config) {
-        if (keyedStateBackend == null) {
-            return StateRequestHandler.unsupported();
-        } else {
-            assert keySerializer != null;
-            return new SimpleStateRequestHandler(
-                    keyedStateBackend, keySerializer, namespaceSerializer, config);
-        }
+        return BeamStateRequestHandler.of(
+                keyedStateBackend,
+                operatorStateBackend,
+                keySerializer,
+                namespaceSerializer,
+                config);
     }
 }

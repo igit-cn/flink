@@ -576,7 +576,7 @@ class StreamExecutionEnvironment(object):
 
             Please make sure the installation packages matches the platform of the cluster
             and the python version used. These packages will be installed using pip,
-            so also make sure the version of Pip (version >= 7.1.0) and the version of
+            so also make sure the version of Pip (version >= 20.3) and the version of
             SetupTools (version >= 37.0.0).
 
         :param requirements_file_path: The path of "requirements.txt" file.
@@ -684,7 +684,7 @@ class StreamExecutionEnvironment(object):
 
         .. note::
 
-            The python udf worker depends on Apache Beam (version == 2.27.0).
+            The python udf worker depends on Apache Beam (version == 2.38.0).
             Please ensure that the specified environment meets the above requirements.
 
         :param python_exec: The path of python interpreter.
@@ -807,17 +807,30 @@ class StreamExecutionEnvironment(object):
         self._j_stream_execution_environment.registerCachedFile(file_path, name, executable)
 
     @staticmethod
-    def get_execution_environment() -> 'StreamExecutionEnvironment':
+    def get_execution_environment(configuration: Configuration = None) \
+            -> 'StreamExecutionEnvironment':
         """
         Creates an execution environment that represents the context in which the
         program is currently executed. If the program is invoked standalone, this
         method returns a local execution environment.
 
+        When executed from the command line the given configuration is stacked on top of the
+        global configuration which comes from the flink-conf.yaml, potentially overriding
+        duplicated options.
+
+        :param configuration: The configuration to instantiate the environment with.
         :return: The execution environment of the context in which the program is executed.
         """
         gateway = get_gateway()
-        j_stream_exection_environment = gateway.jvm.org.apache.flink.streaming.api.environment\
-            .StreamExecutionEnvironment.getExecutionEnvironment()
+        JStreamExecutionEnvironment = gateway.jvm.org.apache.flink.streaming.api.environment \
+            .StreamExecutionEnvironment
+
+        if configuration:
+            j_stream_exection_environment = JStreamExecutionEnvironment.getExecutionEnvironment(
+                configuration._j_configuration)
+        else:
+            j_stream_exection_environment = JStreamExecutionEnvironment.getExecutionEnvironment()
+
         return StreamExecutionEnvironment(j_stream_exection_environment)
 
     def add_source(self, source_func: SourceFunction, source_name: str = 'Custom Source',

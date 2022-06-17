@@ -1288,13 +1288,13 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
                         });
     }
 
-    private void setTokensFor(ContainerLaunchContext containerLaunchContext) throws IOException {
+    private void setTokensFor(ContainerLaunchContext containerLaunchContext) throws Exception {
         LOG.info("Adding delegation tokens to the AM container.");
 
         Credentials credentials = UserGroupInformation.getCurrentUser().getCredentials();
 
         DelegationTokenManager delegationTokenManager =
-                new KerberosDelegationTokenManager(flinkConfiguration);
+                new KerberosDelegationTokenManager(flinkConfiguration, null, null);
         delegationTokenManager.obtainDelegationTokens(credentials);
 
         ByteBuffer tokens = ByteBuffer.wrap(DelegationTokenConverter.serialize(credentials));

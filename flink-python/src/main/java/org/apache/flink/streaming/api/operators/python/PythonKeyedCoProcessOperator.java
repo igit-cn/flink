@@ -126,6 +126,7 @@ public class PythonKeyedCoProcessOperator<OUT>
                         config.get(MAP_STATE_WRITE_CACHE_SIZE)),
                 getFlinkMetricContainer(),
                 getKeyedStateBackend(),
+                getOperatorStateBackend(),
                 keyTypeSerializer,
                 null,
                 new TimerRegistration(
@@ -133,8 +134,7 @@ public class PythonKeyedCoProcessOperator<OUT>
                         internalTimerService,
                         this,
                         VoidNamespaceSerializer.INSTANCE,
-                        PythonTypeUtils.TypeInfoToSerializerConverter.typeInfoSerializerConverter(
-                                timerDataTypeInfo)),
+                        timerDataSerializer),
                 getContainingTask().getEnvironment().getMemoryManager(),
                 getOperatorConfig()
                         .getManagedMemoryFractionOperatorUseCaseOfSlot(
